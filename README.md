@@ -449,11 +449,6 @@ print('Key stored.')
 "
 ```
  
-### 6. Run the scaffold (first time only)
- 
-```bash
-python scaffold.py
-```
  
 ---
  
