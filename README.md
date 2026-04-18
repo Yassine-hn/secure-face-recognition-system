@@ -403,16 +403,11 @@ git clone https://github.com/your-username/secure-face-recognition.git
 cd secure-face-recognition
 ```
  
-### 2. Create and activate a virtual environment
+### 2. Create and activate a Conda environment
  
 ```bash
-python -m venv .venv
- 
-# Linux / macOS
-source .venv/bin/activate
- 
-# Windows
-.venv\Scripts\activate
+conda create -n myenv310 python=3.10 -y
+conda activate myenv310
 ```
  
 ### 3. Install dependencies
@@ -423,12 +418,11 @@ pip install -r requirements.txt
  
 ### 4. Download model weights
  
-InsightFace downloads its models automatically on first use. For MiniFASNet:
+InsightFace downloads its models automatically on first use. For MiniFASNet, follow the instructions in [models/README.md](models/README.md):
  
 ```bash
-# Follow the instructions in models/README.md
-# or run:
-python -c "from silent_face import download_weights; download_weights('models/')"
+# Download the weights from the upstream Silent-Face-Anti-Spoofing repository
+# or use the helper exposed by your local installation if available
 ```
  
 ### 5. Configure environment
