@@ -19,6 +19,12 @@ from security.audit_log import AuditLogger
 from security.cancelable import CancelableTransformer
 from security.database import EnrollmentDatabase
 from security.key_manager import get_db_key
+from security.runtime_checks import (
+	allow_plaintext_database_fallback,
+	assert_runtime_security,
+	get_runtime_mode,
+	require_keyring_only,
+)
 
 
 @dataclass
@@ -34,12 +40,17 @@ class AppServices:
 
 
 def build_default_services(base_dir: str | Path | None = None) -> AppServices:
+	mode = get_runtime_mode()
+	assert_runtime_security(mode)
+	keyring_only = require_keyring_only(mode)
+	allow_plaintext = allow_plaintext_database_fallback(mode)
+
 	base_path = Path(base_dir or Path(__file__).resolve().parents[1])
 	data_dir = base_path / "data"
 	data_dir.mkdir(parents=True, exist_ok=True)
 	db_path = data_dir / "embeddings.db"
 	audit_path = data_dir / "audit.log"
-	db_key = get_db_key()
+	db_key = get_db_key(allow_env_fallback=not keyring_only)
 
 	detector = FaceDetector()
 	embedder = FaceEmbedder()
@@ -47,7 +58,11 @@ def build_default_services(base_dir: str | Path | None = None) -> AppServices:
 	recognition = RecognitionService(detector=detector, embedder=embedder, matcher=matcher)
 	passive_liveness = PassiveLivenessChecker()
 	active_liveness = ActiveLivenessOrchestrator()
-	database = EnrollmentDatabase(db_path=db_path, db_key=db_key, allow_plaintext_fallback=True)
+	database = EnrollmentDatabase(
+		db_path=db_path,
+		db_key=db_key,
+		allow_plaintext_fallback=allow_plaintext,
+	)
 	transformer = CancelableTransformer()
 	enrollment = EnrollmentService(database=database, transformer=transformer)
 	audit_logger = AuditLogger(log_path=audit_path, secret_key=db_key)

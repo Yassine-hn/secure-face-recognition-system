@@ -458,6 +458,16 @@ python main.py
 ```bash
 pytest tests/ -v
 ```
+
+### Runtime security preflight
+
+Before launching in production-like mode, run:
+
+```bash
+SFRS_MODE=production python main.py --validate-security
+```
+
+This validates strict settings such as keyring-only key handling and SQLCipher availability.
  
 ### Running the evaluation benchmark (offline)
  
