@@ -452,6 +452,18 @@ print('Key stored.')
 # Launch the desktop application
 python main.py
 ```
+
+### CI test command
+
+```bash
+python -m unittest -q
+```
+
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs:
+
+- unit tests
+- development security preflight
+- production security preflight
  
 ### Running tests
  
@@ -468,6 +480,10 @@ SFRS_MODE=production python main.py --validate-security
 ```
 
 This validates strict settings such as keyring-only key handling and SQLCipher availability.
+
+### Release checklist
+
+Use [docs/release_checklist.md](docs/release_checklist.md) before creating a release tag.
  
 ### Running the evaluation benchmark (offline)
  

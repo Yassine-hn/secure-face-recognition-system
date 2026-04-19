@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secure-face-recognition-system"
+version = "0.1.0"
+description = "Secure face recognition desktop application with liveness and tamper-evident audit logging"
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Project Team" }
+]
+dependencies = []
+
+[project.scripts]
+sfrs = "main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["core*", "evaluation*", "liveness*", "security*", "ui*"]
+exclude = ["tests*", "data*", "models*"]
