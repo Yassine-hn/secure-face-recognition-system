@@ -93,12 +93,20 @@ class EnrollmentService:
 	database: EnrollmentDatabase
 	transformer: CancelableTransformer | None = None
 
+	@staticmethod
+	def _validate_student_id(student_id: str) -> str:
+		value = student_id.strip()
+		if not value:
+			raise EnrollmentError("student_id must not be empty")
+		return value
+
 	def enroll_embedding(
 		self,
 		student_id: str,
 		embedding: np.ndarray | list[float] | tuple[float, ...],
 		metadata: Optional[dict[str, Any]] = None,
 	) -> EnrollmentRecord:
+		student_id = self._validate_student_id(student_id)
 		average = _as_embedding(embedding)
 		transformed = self.transformer.transform(average) if self.transformer else average
 		return self.database.upsert_enrollment(student_id, transformed, metadata=metadata)
@@ -113,6 +121,7 @@ class EnrollmentService:
 		max_attempts: int = 50,
 		metadata: Optional[dict[str, Any]] = None,
 	) -> EnrollmentRecord:
+		student_id = self._validate_student_id(student_id)
 		embeddings = collect_embeddings(
 			frame_source=frame_source,
 			face_detector=face_detector,

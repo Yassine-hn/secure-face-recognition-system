@@ -7,7 +7,7 @@ import numpy as np
 
 from core.enrollment import EnrollmentError, EnrollmentService, average_embeddings, collect_embeddings
 from security.cancelable import CancelableTransformer
-from security.database import EnrollmentDatabase
+from security.database import DatabaseError, EnrollmentDatabase
 from security.key_manager import KeyManagerError, get_key_from_env, normalize_db_key
 
 
@@ -60,6 +60,15 @@ class TestEnrollmentDatabase(unittest.TestCase):
             fetched = database.get_enrollment("student-1")
             self.assertEqual(fetched.student_id, "student-1")
             self.assertEqual(len(database.list_enrollments()), 1)
+
+    def test_upsert_rejects_empty_student_id(self) -> None:
+        with EnrollmentDatabase(
+            db_path=self.db_path,
+            db_key="test-key",
+            allow_plaintext_fallback=True,
+        ) as database:
+            with self.assertRaises(DatabaseError):
+                database.upsert_enrollment("   ", np.array([1.0, 2.0], dtype=np.float32))
 
 
 class TestEnrollmentService(unittest.TestCase):
@@ -125,6 +134,16 @@ class TestEnrollmentService(unittest.TestCase):
                 sample_count=1,
                 max_attempts=1,
             )
+
+    def test_enroll_rejects_empty_student_id(self) -> None:
+        with EnrollmentDatabase(
+            db_path=self.db_path,
+            db_key="test-key",
+            allow_plaintext_fallback=True,
+        ) as database:
+            service = EnrollmentService(database=database)
+            with self.assertRaises(EnrollmentError):
+                service.enroll_embedding("  ", np.array([1.0, 0.0], dtype=np.float32))
 
 
 if __name__ == "__main__":
