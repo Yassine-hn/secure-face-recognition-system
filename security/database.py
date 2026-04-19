@@ -114,6 +114,9 @@ class EnrollmentDatabase:
 		template: np.ndarray | Iterable[float],
 		metadata: Optional[dict[str, Any]] = None,
 	) -> EnrollmentRecord:
+		student_id = student_id.strip()
+		if not student_id:
+			raise DatabaseError("student_id must not be empty")
 		blob, dimension = _to_blob(template)
 		timestamp = _now_iso()
 		payload = json.dumps(metadata or {}, sort_keys=True)
@@ -133,6 +136,9 @@ class EnrollmentDatabase:
 		return self.get_enrollment(student_id)
 
 	def get_enrollment(self, student_id: str) -> EnrollmentRecord:
+		student_id = student_id.strip()
+		if not student_id:
+			raise DatabaseError("student_id must not be empty")
 		cursor = self._connection.execute(
 			"""
 			SELECT student_id, template, dimension, metadata, created_at, updated_at
@@ -176,6 +182,9 @@ class EnrollmentDatabase:
 		return records
 
 	def delete_enrollment(self, student_id: str) -> None:
+		student_id = student_id.strip()
+		if not student_id:
+			raise DatabaseError("student_id must not be empty")
 		self._connection.execute("DELETE FROM enrollments WHERE student_id = ?", (student_id,))
 		self._connection.commit()
 
