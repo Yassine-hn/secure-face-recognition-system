@@ -6,7 +6,7 @@ from typing import Any
 
 import customtkinter as ctk
 
-from ui.base import ScreenFrame, camera_frame_source
+from ui.base import ScreenFrame, camera_frame_source, camera_source_error, release_camera_source
 from ui.camera_widget import CameraWidget
 
 
@@ -69,7 +69,14 @@ class LivenessScreen(ScreenFrame):
 			self.challenge_var.set(f"Could not create session: {exc}")
 
 	def on_show(self) -> None:
+		release_camera_source(self.camera_source)
+		self.camera_source = camera_frame_source()
+		self.camera.frame_source = self.camera_source
 		self.camera.start()
+		error = camera_source_error(self.camera_source)
+		if error:
+			self.passive_result_var.set(error)
 
 	def on_hide(self) -> None:
 		self.camera.stop()
+		release_camera_source(self.camera_source)

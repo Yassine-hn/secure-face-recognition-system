@@ -6,3 +6,4 @@ models/*.pt
 models/*.pth
 __pycache__/
 .venv/
+docs/camera_feed_fix_local.md

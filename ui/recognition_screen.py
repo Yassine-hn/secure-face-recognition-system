@@ -8,7 +8,7 @@ import customtkinter as ctk
 
 from core.recognition import RecognitionService
 from security.audit_log import AuditLogger
-from ui.base import ScreenFrame, camera_frame_source
+from ui.base import ScreenFrame, camera_frame_source, camera_source_error, release_camera_source
 from ui.camera_widget import CameraWidget
 
 
@@ -51,16 +51,25 @@ class RecognitionScreen(ScreenFrame):
 
 	def _refresh_source(self) -> None:
 		self.camera.stop()
+		release_camera_source(self.camera_source)
 		self.camera_source = camera_frame_source()
 		self.camera.frame_source = self.camera_source
 		self.camera.start()
-		self.status_var.set("Frame source refreshed.")
+		error = camera_source_error(self.camera_source)
+		self.status_var.set(error or "Frame source refreshed.")
 
 	def on_show(self) -> None:
+		release_camera_source(self.camera_source)
+		self.camera_source = camera_frame_source()
+		self.camera.frame_source = self.camera_source
 		self.camera.start()
+		error = camera_source_error(self.camera_source)
+		if error:
+			self.status_var.set(error)
 
 	def on_hide(self) -> None:
 		self.camera.stop()
+		release_camera_source(self.camera_source)
 
 	def run_recognition(self) -> None:
 		try:

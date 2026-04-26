@@ -6,7 +6,7 @@ from typing import Any
 
 import customtkinter as ctk
 
-from ui.base import ScreenFrame, camera_frame_source
+from ui.base import ScreenFrame, camera_frame_source, camera_source_error, release_camera_source
 from ui.camera_widget import CameraWidget
 
 
@@ -54,16 +54,25 @@ class EnrollmentScreen(ScreenFrame):
 
 	def _refresh_source(self) -> None:
 		self.camera.stop()
+		release_camera_source(self.camera_source)
 		self.camera_source = camera_frame_source()
 		self.camera.frame_source = self.camera_source
 		self.camera.start()
-		self.status_var.set("Camera source refreshed.")
+		error = camera_source_error(self.camera_source)
+		self.status_var.set(error or "Camera source refreshed.")
 
 	def on_show(self) -> None:
+		release_camera_source(self.camera_source)
+		self.camera_source = camera_frame_source()
+		self.camera.frame_source = self.camera_source
 		self.camera.start()
+		error = camera_source_error(self.camera_source)
+		if error:
+			self.status_var.set(error)
 
 	def on_hide(self) -> None:
 		self.camera.stop()
+		release_camera_source(self.camera_source)
 
 	def enroll_student(self) -> None:
 		student_id = self.student_id_var.get().strip()
