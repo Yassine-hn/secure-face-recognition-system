@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import random
 import time
+
+import numpy as np
 import traceback
 from typing import Any
 
@@ -51,8 +53,13 @@ class RecognitionScreen(ScreenFrame):
 		self._active_challenge_start: float | None = None
 		self._active_challenge_window: float | None = None
 		self._current_challenge: str | None = None
-		self._iris_target_norm: tuple[float, float] | None = None
-		self._iris_target_tolerance = 15.0
+		self._iris_direction: str | None = None
+		self._iris_baseline: tuple[float, float] | None = None
+		self._iris_eye_width: float | None = None
+		self._mirror_preview = True
+		self._iris_direction_threshold = 0.10
+		self._iris_mirror_mode = self._mirror_preview
+		self._smile_baseline: float | None = None
 		self._timer_job: str | None = None
 
 		self._build_body()
@@ -113,6 +120,10 @@ class RecognitionScreen(ScreenFrame):
 			self._overlay_disabled = True
 			return frame
 
+		display_frame = frame
+		if self._mirror_preview:
+			display_frame = cv2.flip(frame, 1)
+
 		try:
 			if self._face_cascade is None:
 				cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -122,26 +133,35 @@ class RecognitionScreen(ScreenFrame):
 					return frame
 				self._face_cascade = cascade
 
-			gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+			gray = cv2.cvtColor(display_frame, cv2.COLOR_BGR2GRAY)
 			faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
 		except Exception:
 			return frame
 
-		annotated = frame.copy()
-		if self._current_challenge == "iris" and self._iris_target_norm is not None:
+		annotated = display_frame.copy()
+		if self._current_challenge == "iris" and self._iris_direction is not None:
 			h, w = annotated.shape[:2]
-			tx = int(self._iris_target_norm[0] * w)
-			ty = int(self._iris_target_norm[1] * h)
-			cv2.circle(annotated, (tx, ty), 8, (30, 30, 220), -1)
-			cv2.circle(annotated, (tx, ty), 12, (240, 240, 240), 2)
+			center_x = int(w * 0.5)
+			center_y = int(h * 0.18)
+			arrow_len = max(60, int(w * 0.2))
+			direction = self._iris_direction
+			if direction == "left":
+				start = (center_x + arrow_len // 2, center_y)
+				end = (center_x - arrow_len // 2, center_y)
+				label = "LOOK LEFT"
+			else:
+				start = (center_x - arrow_len // 2, center_y)
+				end = (center_x + arrow_len // 2, center_y)
+				label = "LOOK RIGHT"
+			cv2.arrowedLine(annotated, start, end, (30, 30, 220), 4, tipLength=0.25)
 			cv2.putText(
 				annotated,
-				"Target",
-				(tx + 14, ty - 6),
+				label,
+				(center_x - arrow_len // 2, max(20, center_y - 12)),
 				cv2.FONT_HERSHEY_SIMPLEX,
-				0.5,
+				0.6,
 				(240, 240, 240),
-				1,
+				2,
 				cv2.LINE_AA,
 			)
 		for (x, y, w, h) in faces:
@@ -208,11 +228,18 @@ class RecognitionScreen(ScreenFrame):
 		"""Get user-friendly instruction for a challenge."""
 		instructions = {
 			"blink": "BLINK YOUR EYES\n\nPlease blink your eyes naturally.\nThe system will detect the eye movement.",
-			"iris": "LOOK AT THE TARGET\n\nLook at the red target point on the camera feed.\nKeep your head still, only move your eyes.",
+			"iris": "LOOK LEFT OR RIGHT\n\nMove only your eyes in the arrow direction.\nKeep your head still.",
 			"head_pose": "TURN YOUR HEAD\n\nSlowly turn or tilt your head.\nMove left, right, up, or down.",
 			"mouth": "OPEN YOUR MOUTH\n\nOpen your mouth wide.\nThe system will detect the mouth opening.",
 			"smile": "SMILE\n\nGive a natural smile.\nShow your teeth if possible.",
 		}
+		if challenge_name == "iris":
+			direction = (self._iris_direction or "left").upper()
+			return (
+				f"LOOK {direction}\n\n"
+				"Move only your eyes in the arrow direction.\n"
+				"Keep your head still."
+			)
 		return instructions.get(challenge_name, f"Complete challenge: {challenge_name}")
 
 	def run_active_liveness(self) -> None:
@@ -304,20 +331,23 @@ class RecognitionScreen(ScreenFrame):
 			self._active_challenge_start = None
 			self._active_challenge_window = None
 			self._current_challenge = None
-			self._iris_target_norm = None
+			self._iris_direction = None
+			self._iris_baseline = None
+			self._iris_eye_width = None
 			self._stop_timer()
 			return
 
 		challenge = challenges[current_index]
 		self._current_challenge = challenge
 		if challenge == "iris":
-			if self._iris_target_norm is None:
-				self._iris_target_norm = self._select_iris_target()
-				_debug_print(
-					f"[DEBUG] Iris target set: norm=({self._iris_target_norm[0]:.2f}, {self._iris_target_norm[1]:.2f})"
-				)
+			self._iris_direction = random.choice(["left", "right"])
+			self._iris_baseline = None
+			self._iris_eye_width = None
+			_debug_print(f"[DEBUG] Iris direction set: {self._iris_direction}")
 		else:
-			self._iris_target_norm = None
+			self._iris_direction = None
+			self._iris_baseline = None
+			self._iris_eye_width = None
 		self._active_challenge_start = time.monotonic()
 		self._stop_timer()
 		self._update_timer()
@@ -385,6 +415,9 @@ class RecognitionScreen(ScreenFrame):
 	# Iris landmarks (MediaPipe 468-477)
 	_LEFT_IRIS_INDICES = [468, 469, 470, 471, 472]
 	_RIGHT_IRIS_INDICES = [473, 474, 475, 476, 477]
+	# Eye corner indices for width estimation
+	_LEFT_EYE_CORNER_INDICES = (33, 133)
+	_RIGHT_EYE_CORNER_INDICES = (362, 263)
 
 	def _extract_landmarks_2d(self, face_landmarks: Any, indices: list[int], w: int, h: int) -> list[list[float]]:
 		"""Extract (x, y) pixel coordinates for the given landmark indices."""
@@ -394,17 +427,19 @@ class RecognitionScreen(ScreenFrame):
 			points.append([lm.x * w, lm.y * h])
 		return points
 
-	def _select_iris_target(self) -> tuple[float, float]:
-		"""Pick a visible target in normalized coordinates."""
-		return (random.uniform(0.2, 0.8), random.uniform(0.2, 0.8))
-
-	def _iris_target_pixel(self, frame: Any) -> tuple[float, float]:
-		h, w = frame.shape[:2]
-		if self._iris_target_norm is None:
-			self._iris_target_norm = self._select_iris_target()
-			tx, ty = self._iris_target_norm
-			_debug_print(f"[DEBUG] Iris target set: norm=({tx:.2f}, {ty:.2f})")
-		return (self._iris_target_norm[0] * w, self._iris_target_norm[1] * h)
+	def _estimate_eye_width(self, face_landmarks: Any, w: int, h: int) -> float:
+		left_outer = face_landmarks.landmark[self._LEFT_EYE_CORNER_INDICES[0]]
+		left_inner = face_landmarks.landmark[self._LEFT_EYE_CORNER_INDICES[1]]
+		right_outer = face_landmarks.landmark[self._RIGHT_EYE_CORNER_INDICES[0]]
+		right_inner = face_landmarks.landmark[self._RIGHT_EYE_CORNER_INDICES[1]]
+		left_dx = (left_outer.x - left_inner.x) * w
+		left_dy = (left_outer.y - left_inner.y) * h
+		right_dx = (right_outer.x - right_inner.x) * w
+		right_dy = (right_outer.y - right_inner.y) * h
+		left_width = (left_dx ** 2 + left_dy ** 2) ** 0.5
+		right_width = (right_dx ** 2 + right_dy ** 2) ** 0.5
+		width = (left_width + right_width) / 2.0
+		return float(width)
 
 	def _evaluate_challenge_from_frames(
 		self,
@@ -472,6 +507,10 @@ class RecognitionScreen(ScreenFrame):
 			return
 
 		frames_processed = 0
+		mouth_baseline_samples: list[float] = []
+		head_pose_samples: list[Any] = []
+		last_iris_debug_time = 0.0
+		last_head_pose_debug_time = 0.0
 
 		while (time.monotonic() - start_time) < capture_duration:
 			frame = None
@@ -536,28 +575,43 @@ class RecognitionScreen(ScreenFrame):
 							challenge_passed = True
 
 				elif challenge_name == "head_pose":
-					from liveness.checks.head_pose import pose_from_landmarks, relative_pose_delta, head_pose_within_threshold
+					from liveness.checks.head_pose import HeadPose, pose_from_landmarks, relative_pose_delta, head_pose_within_threshold
 					pts = self._extract_landmarks_2d(face_landmarks, self._HEAD_POSE_INDICES, w, h)
 					current_pose = pose_from_landmarks(pts)
 
 					if not baseline_captured and consecutive_valid_frames >= MIN_CONSECUTIVE_FOR_BASELINE:
 						# Sanity check: pose values should be reasonable
 						if all(abs(v) <= 60.0 for v in (current_pose.pitch, current_pose.yaw, current_pose.roll)):
-							baseline_pose = current_pose
-							baseline_captured = True
-							_debug_print(
-								f"[DEBUG] evaluate_head_pose: baseline pitch={current_pose.pitch:.1f}, "
-								f"yaw={current_pose.yaw:.1f}, roll={current_pose.roll:.1f}"
-							)
+							head_pose_samples.append(current_pose)
+							if len(head_pose_samples) >= 10:
+								baseline_pose = HeadPose(
+									pitch=float(np.median([p.pitch for p in head_pose_samples])),
+									yaw=float(np.median([p.yaw for p in head_pose_samples])),
+									roll=float(np.median([p.roll for p in head_pose_samples])),
+								)
+								baseline_captured = True
+								_debug_print(
+									f"[DEBUG] evaluate_head_pose: baseline pitch={baseline_pose.pitch:.1f}, "
+									f"yaw={baseline_pose.yaw:.1f}, roll={baseline_pose.roll:.1f}"
+								)
 					elif baseline_pose is not None:
 						if frames_processed >= MIN_FRAMES_BEFORE_PASS:
 							delta = relative_pose_delta(current_pose, baseline_pose)
-							if head_pose_within_threshold(delta, threshold=10.0):
+							threshold = 7.0
+							if head_pose_within_threshold(delta, threshold=threshold):
 								_debug_print(
 									f"[DEBUG] evaluate_head_pose: delta pitch={delta.pitch:.1f}, "
-									f"yaw={delta.yaw:.1f}, roll={delta.roll:.1f}, threshold=10.0 => PASS"
+									f"yaw={delta.yaw:.1f}, roll={delta.roll:.1f}, threshold={threshold:.1f} => PASS"
 								)
 								challenge_passed = True
+							elif _debug_enabled():
+								current_time = time.monotonic()
+								if current_time - last_head_pose_debug_time >= 0.5:
+									_debug_print(
+										f"[DEBUG] evaluate_head_pose: delta pitch={delta.pitch:.1f}, "
+										f"yaw={delta.yaw:.1f}, roll={delta.roll:.1f}, threshold={threshold:.1f} => not yet"
+									)
+									last_head_pose_debug_time = current_time
 
 				elif challenge_name == "mouth":
 					from liveness.checks.mouth import mouth_aspect_ratio, mouth_open
@@ -568,16 +622,15 @@ class RecognitionScreen(ScreenFrame):
 						f"frames_needed={MIN_FRAMES_BEFORE_PASS}, consecutive={consecutive_valid_frames}"
 					)
 					
-					# Require baseline capture like other challenges
+					# Capture baseline as the median of initial samples
 					if not baseline_captured and consecutive_valid_frames >= MIN_CONSECUTIVE_FOR_BASELINE:
-						# Sanity check: baseline MAR should be in reasonable range for closed mouth
-						if 0.0 <= mar <= 0.2:  # Closed mouth should have low MAR
-							self._mouth_baseline = mar
+						mouth_baseline_samples.append(mar)
+						if len(mouth_baseline_samples) >= 10:
+							baseline_value = float(np.median(np.asarray(mouth_baseline_samples)))
+							self._mouth_baseline = baseline_value
 							baseline_captured = True
-							_debug_print(f"[DEBUG] evaluate_mouth_open: baseline MAR={mar:.3f}")
-						else:
 							_debug_print(
-								f"[DEBUG] evaluate_mouth_open: baseline MAR too high ({mar:.3f}), continuing"
+								f"[DEBUG] evaluate_mouth_open: baseline MAR (median)={baseline_value:.3f}"
 							)
 					elif baseline_captured and hasattr(self, '_mouth_baseline'):
 						# Check if mouth is open enough compared to baseline
@@ -586,9 +639,16 @@ class RecognitionScreen(ScreenFrame):
 							f"[DEBUG] evaluate_mouth_open: MAR increase={mar_increase:.3f} "
 							f"(current={mar:.3f}, baseline={self._mouth_baseline:.3f})"
 						)
-						if frames_processed >= MIN_FRAMES_BEFORE_PASS and mar_increase >= 0.2:
+						if frames_processed >= MIN_FRAMES_BEFORE_PASS and mar_increase >= 0.10:
 							_debug_print(
-								f"[DEBUG] evaluate_mouth_open: PASS (MAR increase={mar_increase:.3f} >= 0.2)"
+								f"[DEBUG] evaluate_mouth_open: PASS (MAR increase={mar_increase:.3f} >= 0.10)"
+							)
+							challenge_passed = True
+					elif not baseline_captured and frames_processed >= MIN_FRAMES_BEFORE_PASS:
+						# Fallback: accept a clearly open mouth even without baseline
+						if mar >= 0.55:
+							_debug_print(
+								f"[DEBUG] evaluate_mouth_open: PASS (absolute MAR={mar:.3f} >= 0.55)"
 							)
 							challenge_passed = True
 
@@ -602,11 +662,25 @@ class RecognitionScreen(ScreenFrame):
 					)
 					if len(all_pts) > max(291, 454):
 						ratio = lip_corner_spread_ratio(all_pts)
-						if frames_processed >= MIN_FRAMES_BEFORE_PASS and smile_detected(ratio, threshold=0.35):
+						if self._smile_baseline is None and consecutive_valid_frames >= MIN_CONSECUTIVE_FOR_BASELINE:
+							self._smile_baseline = ratio
 							_debug_print(
-								f"[DEBUG] evaluate_smile: ratio={ratio:.3f}, threshold=0.35 => PASS"
+								f"[DEBUG] evaluate_smile: baseline ratio={ratio:.3f}"
 							)
-							challenge_passed = True
+						elif self._smile_baseline is not None and frames_processed >= MIN_FRAMES_BEFORE_PASS:
+							delta = ratio - self._smile_baseline
+							threshold = 0.05
+							if delta >= threshold:
+								_debug_print(
+									f"[DEBUG] evaluate_smile: ratio={ratio:.3f}, baseline={self._smile_baseline:.3f}, "
+									f"delta={delta:.3f} >= {threshold:.2f} => PASS"
+								)
+								challenge_passed = True
+							elif _debug_enabled() and frames_processed % 10 == 0:
+								_debug_print(
+									f"[DEBUG] evaluate_smile: ratio={ratio:.3f}, baseline={self._smile_baseline:.3f}, "
+									f"delta={delta:.3f} < {threshold:.2f}"
+								)
 
 				elif challenge_name == "iris":
 					from liveness.checks.iris import iris_centroid
@@ -616,16 +690,39 @@ class RecognitionScreen(ScreenFrame):
 					left_c = iris_centroid(left_iris_pts)
 					right_c = iris_centroid(right_iris_pts)
 					current_center = ((left_c[0] + right_c[0]) / 2.0, (left_c[1] + right_c[1]) / 2.0)
-					target = self._iris_target_pixel(frame)
-					dx = current_center[0] - target[0]
-					dy = current_center[1] - target[1]
-					distance = (dx ** 2 + dy ** 2) ** 0.5
-					if frames_processed >= MIN_FRAMES_BEFORE_PASS and distance <= self._iris_target_tolerance:
-						_debug_print(
-							f"[DEBUG] evaluate_iris_tracking: distance={distance:.2f}, "
-							f"tolerance={self._iris_target_tolerance:.2f} => PASS"
-						)
-						challenge_passed = True
+
+					if not baseline_captured and consecutive_valid_frames >= MIN_CONSECUTIVE_FOR_BASELINE:
+						eye_width = self._estimate_eye_width(face_landmarks, w, h)
+						if eye_width > 0.0:
+							self._iris_baseline = current_center
+							self._iris_eye_width = eye_width
+							baseline_captured = True
+							_debug_print(
+								f"[DEBUG] evaluate_iris_tracking: baseline={self._iris_baseline}, "
+								f"eye_width={eye_width:.2f}"
+							)
+					elif baseline_captured and self._iris_baseline and self._iris_eye_width:
+						dx = current_center[0] - self._iris_baseline[0]
+						threshold = self._iris_eye_width * self._iris_direction_threshold
+						direction = self._iris_direction or "left"
+						if self._iris_mirror_mode:
+							direction = "right" if direction == "left" else "left"
+						if frames_processed >= MIN_FRAMES_BEFORE_PASS:
+							passed = dx <= -threshold if direction == "left" else dx >= threshold
+							if passed:
+								_debug_print(
+									f"[DEBUG] evaluate_iris_tracking: dx={dx:.2f}, "
+									f"threshold={threshold:.2f}, direction={direction} => PASS"
+								)
+								challenge_passed = True
+							elif _debug_enabled():
+								current_time = time.monotonic()
+								if current_time - last_iris_debug_time >= 0.5:
+									_debug_print(
+										f"[DEBUG] evaluate_iris_tracking: dx={dx:.2f}, "
+										f"threshold={threshold:.2f}, direction={direction} => not yet"
+									)
+									last_iris_debug_time = current_time
 
 			except Exception as exc:
 				_debug_print(f"[DEBUG] evaluate_{challenge_name}: evaluation error: {exc}")
