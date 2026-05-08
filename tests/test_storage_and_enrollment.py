@@ -16,6 +16,17 @@ class FakeDetector:
         return frame.get("face")
 
 
+class FakeDetectionResult:
+    def __init__(self, embedding):
+        self.embedding = embedding
+        self.face = np.array([9.0, 9.0, 9.0], dtype=np.float32)
+
+
+class FakeEmbeddingDetector:
+    def detect(self, frame):
+        return FakeDetectionResult(frame.get("embedding"))
+
+
 class FakeEmbedder:
     def extract_embedding(self, face):
         return face
@@ -124,6 +135,21 @@ class TestEnrollmentService(unittest.TestCase):
             self.assertEqual(record.student_id, "student-2")
             self.assertEqual(record.metadata["source"], "camera")
             self.assertEqual(record.template.shape, (3,))
+
+    def test_collect_embeddings_uses_detector_embedding_when_available(self) -> None:
+        frames = [{"embedding": np.array([1.0, 2.0, 3.0], dtype=np.float32)}]
+
+        def frame_source():
+            return frames.pop(0) if frames else None
+
+        embeddings = collect_embeddings(
+            frame_source=frame_source,
+            face_detector=FakeEmbeddingDetector(),
+            embedder=FakeEmbedder(),
+            sample_count=1,
+            max_attempts=1,
+        )
+        self.assertTrue(np.allclose(embeddings[0], np.array([1.0, 2.0, 3.0], dtype=np.float32)))
 
     def test_collect_embeddings_raises_when_not_enough_samples(self) -> None:
         with self.assertRaises(EnrollmentError):

@@ -50,7 +50,13 @@ class AuditScreen(ScreenFrame):
 				return
 			self.status_var.set(f"Loaded {len(self._rows)} entries.")
 			for row in reversed(self._rows):
-				text = f"{row.get('timestamp')} | {row.get('result')} | {row.get('student_hash', 'anonymous')} | {row.get('session_token', '-')[:12]}..."
+				timestamp = row.get("timestamp") or "-"
+				activity_type = row.get("activity_type") or "-"
+				result = row.get("result") or "-"
+				student_id = row.get("student_id") or "anonymous"
+				session_token = row.get("session_token")
+				token_preview = f"{str(session_token)[:12]}..." if session_token else "-"
+				text = f"{timestamp} | {activity_type} | {result} | {student_id} | {token_preview}"
 				ctk.CTkLabel(self.listing, text=text, anchor="w", justify="left").pack(fill="x", padx=12, pady=6)
 		except Exception as exc:
 			self.status_var.set(f"Could not load audit log: {exc}")
@@ -59,7 +65,7 @@ class AuditScreen(ScreenFrame):
 		try:
 			export_path = Path(self.services.audit_logger.log_path).with_suffix(".csv")
 			with export_path.open("w", newline="", encoding="utf-8") as file:
-				writer = csv.DictWriter(file, fieldnames=["timestamp", "result", "student_hash", "session_token", "metadata", "prev_hmac", "hmac"])
+				writer = csv.DictWriter(file, fieldnames=["timestamp", "activity_type", "result", "student_id", "student_hash", "session_token", "metadata", "prev_hmac", "hmac"])
 				writer.writeheader()
 				for row in self._rows:
 					writer.writerow(row)

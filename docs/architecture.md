@@ -24,8 +24,9 @@ The code now mirrors that flow in practice:
 The UI uses the same sequence:
 
 1. Enrollment captures multiple samples, averages embeddings, and stores a transformed template.
-2. Recognition checks passive liveness first.
-3. If passive liveness passes, the enrolled templates are loaded and matched.
+2. Recognition captures a burst of frames, checks passive liveness and averages the scores to reduce noise.
+3. If passive liveness passes or requires further verification, the enrolled templates are matched against the best recognized frame.
+4. Active liveness may be triggered, during which identity is continuously verified on the specific frames passing the challenges.
 4. Every grant or denial is written to the audit log.
 
 ## UI structure

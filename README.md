@@ -40,7 +40,7 @@ The system processes every access attempt through six sequential stages. A failu
 └──────────────────────┬──────────────────────────────────┘
                        │
                ┌───────▼────────┐
-               │  Face detection │  ← RetinaFace
+               │  Face detection│  ← RetinaFace
                └───────┬────────┘
                        │  face found
                ┌───────▼────────────┐
@@ -306,7 +306,7 @@ secure-face-recognition/
  
 **Problem addressed:** A printed photograph or a face displayed on a screen has different micro-texture and frequency characteristics than live skin. This defeats simple print and basic replay attacks.
  
-**Implementation:** MiniFASNet v2, a lightweight convolutional network pre-trained on the NUAA, CASIA-FASD, and Replay-Attack datasets, classifies each face crop as real or spoof before embedding extraction is attempted. The model analyzes specular highlights, moiré patterns, and edge artifacts that are invisible to the human eye but present in spoofed media.
+**Implementation:** A tightly cropped face image is extracted and passed to MiniFASNet v2, a lightweight convolutional network pre-trained on the NUAA, CASIA-FASD, and Replay-Attack datasets, which classifies the crop as real or spoof. The model analyzes specular highlights, moiré patterns, and edge artifacts that are invisible to the human eye but present in spoofed media. The system enforces a strict fail-closed policy: if the model is missing, it returns a score of 0.0 to prevent bypasses.
  
 **Limitation:** A high-quality silicone mask with sufficient texture depth may pass this check. It is not the only liveness layer.
  
@@ -330,6 +330,8 @@ secure-face-recognition/
 | Iris tracking | Iris centroid follows moving on-screen dot | MediaPipe iris landmarks 468–477 |
  
 Each challenge has a 2-second completion window. A session token (SHA-256 hash of timestamp + random nonce) is generated per session and bound to the challenge sequence, preventing a recorded response from being replayed in a future session.
+ 
+**Identity Binding (TOCTOU Defense):** To prevent Time-of-Check to Time-of-Use attacks where an attacker swaps a photo for their real face during the challenge, the system runs facial recognition on the exact frame that passes the active liveness challenge to ensure the person performing the action is the enrolled user.
  
 **Per-user calibration:** EAR and MAR thresholds are not global fixed values. They are calibrated from the user's own landmarks during enrollment, making the system robust to anatomical variation (deep-set eyes, monolid eyes, etc.).
  
@@ -382,6 +384,7 @@ If the system is deployed in a client–server configuration, the following addi
 | Screen replay video | MiniFASNet + challenge–response | Passive + active liveness |
 | 3D mask | Challenge–response (iris tracking) | Active liveness |
 | Pre-recorded response replay | Session token (timestamp + nonce) | Active liveness |
+| Photo swap during challenge | Identity bound to liveness frames | Active liveness |
 | Stolen embedding database | Cancelable templates + AES-256 | Storage security |
 | Embedding inversion attack | Cancelable projection — DB has no raw embeddings | Storage security |
 | Log tampering | HMAC chain | Audit integrity |

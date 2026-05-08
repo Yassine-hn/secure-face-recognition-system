@@ -42,9 +42,15 @@ The DB key is not committed to the repository or written into the database file.
 
 Countermeasure: [security/key_manager.py](../security/key_manager.py)
 
+### Time-of-Check to Time-of-Use (TOCTOU)
+
+An attacker might attempt to present a photo for recognition, and then swap it for their real face to pass active liveness.
+
+Countermeasure: Identity is verified directly on the frames that pass the active liveness challenges to strongly bind the liveness check to the recognized user. Location: `ui/recognition_screen.py`
+
 ## Residual risks
 
-- A high-quality presentation attack can still evade simple texture heuristics if the runtime lacks the full MiniFASNet model.
+- If the MiniFASNet model is missing, the system will securely fail-closed (deny access) rather than fallback to an unreliable heuristic.
 - A user can always be denied service if the camera feed is unavailable or too noisy.
 - If SQLCipher is not installed, the repository falls back to sqlite for development, which is not equivalent to the production security target.
 

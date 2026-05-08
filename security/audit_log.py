@@ -114,6 +114,7 @@ class AuditLogger:
 		session_token: Optional[str] = None,
 		metadata: Optional[dict[str, Any]] = None,
 		timestamp: Optional[str] = None,
+		activity_type: Optional[str] = None,
 	) -> dict[str, Any]:
 		entries = self.read_entries()
 		previous_hmac = entries[-1]["hmac"] if entries else "0" * 64
@@ -121,7 +122,9 @@ class AuditLogger:
 		ts = timestamp or datetime.now(timezone.utc).isoformat()
 		entry: dict[str, Any] = {
 			"timestamp": ts,
+			"activity_type": activity_type,
 			"result": result,
+			"student_id": student_id,
 			"student_hash": hash_student_id(student_id) if student_id else None,
 			"session_token": session_token,
 			"metadata": metadata or {},
@@ -146,6 +149,7 @@ def append_event(
 	session_token: Optional[str] = None,
 	metadata: Optional[dict[str, Any]] = None,
 	timestamp: Optional[str] = None,
+	activity_type: Optional[str] = None,
 ) -> dict[str, Any]:
 	"""Convenience functional API for one-off event appends."""
 	logger = AuditLogger(log_path=log_path, secret_key=secret_key)
@@ -155,6 +159,7 @@ def append_event(
 		session_token=session_token,
 		metadata=metadata,
 		timestamp=timestamp,
+		activity_type=activity_type,
 	)
 
 

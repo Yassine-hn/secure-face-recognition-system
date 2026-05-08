@@ -5,7 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+import os
+
 import numpy as np
+
+
+def _debug_enabled() -> bool:
+	return os.getenv("LIVENESS_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _debug_print(message: str) -> None:
+	if _debug_enabled():
+		print(message)
 
 
 class IrisDetectionError(ValueError):
@@ -61,10 +72,22 @@ def evaluate_iris_tracking(
 ) -> bool:
 	"""Evaluate iris tracking against a target point or IrisTarget."""
 	if isinstance(target, IrisTarget):
-		return iris_tracking_detected(points, target.position, target.tolerance)
+		distance = iris_distance(points, target.position)
+		passed = distance <= target.tolerance
+		_debug_print(
+			f"[DEBUG] evaluate_iris_tracking: distance={distance:.2f}, "
+			f"tolerance={target.tolerance:.2f} => {'PASS' if passed else 'FAIL'}"
+		)
+		return passed
 	if target is None:
 		raise IrisDetectionError("target must be provided")
 	if tolerance is None:
 		tolerance = 15.0
-	return iris_tracking_detected(points, target, tolerance)
+	distance = iris_distance(points, target)
+	passed = distance <= tolerance
+	_debug_print(
+		f"[DEBUG] evaluate_iris_tracking: distance={distance:.2f}, "
+		f"tolerance={tolerance:.2f} => {'PASS' if passed else 'FAIL'}"
+	)
+	return passed
 

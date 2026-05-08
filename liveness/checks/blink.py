@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
+import os
+
 import numpy as np
+
+
+def _debug_enabled() -> bool:
+	return os.getenv("LIVENESS_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _debug_print(message: str) -> None:
+	if _debug_enabled():
+		print(message)
 
 
 class BlinkDetectionError(ValueError):
@@ -51,8 +62,12 @@ def evaluate_blink(
 	"""Evaluate a blink challenge from eye landmarks and an optional baseline."""
 	ear = eye_aspect_ratio(points)
 	if threshold is not None:
-		return ear <= threshold
+		passed = ear <= threshold
+		_debug_print(f"[DEBUG] evaluate_blink: EAR={ear:.3f}, threshold={threshold:.3f} => {'PASS' if passed else 'FAIL'}")
+		return passed
 	if baseline is None:
 		raise BlinkDetectionError("baseline or threshold must be provided")
-	return blink_detected(ear, baseline)
+	passed = blink_detected(ear, baseline)
+	_debug_print(f"[DEBUG] evaluate_blink: EAR={ear:.3f}, baseline={baseline:.3f} => {'PASS' if passed else 'FAIL'}")
+	return passed
 

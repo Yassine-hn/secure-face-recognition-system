@@ -7,7 +7,7 @@ import time
 from typing import Any, Callable, Optional
 
 import customtkinter as ctk
-from PIL import Image, ImageTk
+from PIL import Image
 
 
 class CameraWidget(ctk.CTkFrame):
@@ -17,6 +17,7 @@ class CameraWidget(ctk.CTkFrame):
 		self,
 		master: Any,
 		frame_source: Callable[[], Any],
+		frame_processor: Optional[Callable[[Any], Any]] = None,
 		fps: int = 12,
 		width: int = 640,
 		height: int = 360,
@@ -25,6 +26,7 @@ class CameraWidget(ctk.CTkFrame):
 	) -> None:
 		super().__init__(master, **kwargs)
 		self.frame_source = frame_source
+		self.frame_processor = frame_processor
 		self.fps = max(1, int(fps))
 		self.width = width
 		self.height = height
@@ -60,6 +62,11 @@ class CameraWidget(ctk.CTkFrame):
 				frame = None
 
 			if frame is not None:
+				if self.frame_processor is not None:
+					try:
+						frame = self.frame_processor(frame)
+					except Exception:
+						pass
 				self.after(0, self._update_frame, frame)
 			time.sleep(delay)
 
@@ -85,8 +92,7 @@ class CameraWidget(ctk.CTkFrame):
 		except Exception:
 			return
 
-		pil_image = pil_image.resize((self.width, self.height))
-		photo = ImageTk.PhotoImage(pil_image)
+		photo = ctk.CTkImage(pil_image, size=(self.width, self.height))
 		self._image_ref = photo
 		self.preview.configure(image=photo, text="")
 

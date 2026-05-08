@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 
 from security.runtime_checks import validate_runtime_security
 
@@ -19,6 +21,12 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
 	args = _parse_args()
+	if os.getenv("LIVENESS_DEBUG", "").lower() in {"1", "true", "yes", "on"}:
+		logging.basicConfig(
+			level=logging.INFO,
+			format="[%(levelname)s] %(name)s: %(message)s",
+		)
+		print("[DEBUG] LIVENESS_DEBUG enabled: verbose liveness logs will be printed.")
 	if args.validate_security:
 		ok, issues = validate_runtime_security()
 		if ok:

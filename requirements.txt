@@ -9,6 +9,8 @@ mediapipe==0.10.11          # 468-point Face Mesh — EAR, MAR, head pose, iris 
 torch==2.2.2                # MiniFASNet inference runtime
 torchvision==0.17.2         # Image transforms used by MiniFASNet preprocessing
 scipy==1.13.0               # Euclidean distance for EAR/MAR landmark pairs
+# Install from upstream GitHub repo (not on PyPI):
+#   pip install git+https://github.com/minivision-ai/Silent-Face-Anti-Spoofing.git
 
 # ── Security & cryptography ───────────────────────────────────────────────────
 sqlcipher3==0.5.3           # AES-256 encrypted SQLite (SQLCipher Python bindings)

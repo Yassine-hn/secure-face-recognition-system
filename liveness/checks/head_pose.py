@@ -5,7 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+import os
+
 import numpy as np
+
+
+def _debug_enabled() -> bool:
+	return os.getenv("LIVENESS_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _debug_print(message: str) -> None:
+	if _debug_enabled():
+		print(message)
 
 
 class HeadPoseDetectionError(ValueError):
@@ -91,5 +102,10 @@ def evaluate_head_pose(
 		delta = relative_pose_delta(current, baseline_pose)
 	if threshold is None:
 		threshold = 10.0
-	return head_pose_within_threshold(delta, threshold)
+	passed = head_pose_within_threshold(delta, threshold)
+	_debug_print(
+		f"[DEBUG] evaluate_head_pose: delta pitch={delta.pitch:.1f}, yaw={delta.yaw:.1f}, "
+		f"roll={delta.roll:.1f}, threshold={threshold:.1f} => {'PASS' if passed else 'FAIL'}"
+	)
+	return passed
 

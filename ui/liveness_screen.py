@@ -52,11 +52,35 @@ class LivenessScreen(ScreenFrame):
 			if frame is None:
 				self.passive_result_var.set("No frame available from camera.")
 				return
-			result = self.services.passive_liveness.classify(frame)
-			self.passive_result_var.set(f"{result.label.upper()} at score {result.score:.3f}")
+
+			try:
+				detection = self.services.recognition.detect_face(frame)
+				face_crop = getattr(detection, "face", frame)
+			except Exception:
+				face_crop = frame
+
+			result = self.services.passive_liveness.classify(face_crop)
+			if not result.used_model:
+				display = (
+					f"⚠ HEURISTIC FALLBACK — score {result.score:.3f}\n"
+					"MiniFASNet model is NOT loaded.\n"
+					"This score is UNRELIABLE and cannot distinguish "
+					"real faces from photos. Install the "
+					"Silent-Face-Anti-Spoofing package and download "
+					"the model weights."
+				)
+			else:
+				display = f"{result.label.upper()} at score {result.score:.3f}"
+			self.passive_result_var.set(display)
 			self.services.audit_logger.append_event(
 				result="GRANTED" if result.is_live else "DENIED",
-				metadata={"screen": "liveness", "mode": "passive", "score": result.score},
+				activity_type="PASSIVE_LIVENESS",
+				metadata={
+					"screen": "liveness",
+					"mode": "passive",
+					"score": result.score,
+					"used_model": result.used_model,
+				},
 			)
 		except Exception as exc:
 			self.passive_result_var.set(f"Passive check failed: {exc}")

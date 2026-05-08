@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
+import os
+
 import numpy as np
+
+
+def _debug_enabled() -> bool:
+	return os.getenv("LIVENESS_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _debug_print(message: str) -> None:
+	if _debug_enabled():
+		print(message)
 
 
 class SmileDetectionError(ValueError):
@@ -47,5 +58,7 @@ def evaluate_smile(
 	ratio = lip_corner_spread_ratio(landmarks)
 	if threshold is None:
 		threshold = 0.35
-	return smile_detected(ratio, threshold)
+	passed = smile_detected(ratio, threshold)
+	_debug_print(f"[DEBUG] evaluate_smile: ratio={ratio:.3f}, threshold={threshold:.3f} => {'PASS' if passed else 'FAIL'}")
+	return passed
 

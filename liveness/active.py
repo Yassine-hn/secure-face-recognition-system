@@ -66,7 +66,7 @@ class ActiveLivenessOrchestrator:
 		challenge_pool: Optional[Iterable[str]] = None,
 		min_challenges: int = 2,
 		max_challenges: int = 3,
-		window_seconds: float = 2.0,
+		window_seconds: float = 5.0,
 		rng: Optional[random.Random] = None,
 	) -> None:
 		self.challenge_pool = tuple(challenge_pool or default_challenge_names())

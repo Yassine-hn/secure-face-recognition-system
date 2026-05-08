@@ -55,7 +55,10 @@ def build_default_services(base_dir: str | Path | None = None) -> AppServices:
 	detector = FaceDetector()
 	embedder = FaceEmbedder()
 	matcher = FaceMatcher(threshold=0.5)
-	recognition = RecognitionService(detector=detector, embedder=embedder, matcher=matcher)
+	# Use the same transformer for both enrollment and recognition
+	# This ensures query embeddings are transformed the same way as stored templates
+	transformer = CancelableTransformer(seed=42)
+	recognition = RecognitionService(detector=detector, embedder=embedder, matcher=matcher, transformer=transformer)
 	passive_liveness = PassiveLivenessChecker()
 	active_liveness = ActiveLivenessOrchestrator()
 	database = EnrollmentDatabase(
@@ -63,7 +66,6 @@ def build_default_services(base_dir: str | Path | None = None) -> AppServices:
 		db_key=db_key,
 		allow_plaintext_fallback=allow_plaintext,
 	)
-	transformer = CancelableTransformer()
 	enrollment = EnrollmentService(database=database, transformer=transformer)
 	audit_logger = AuditLogger(log_path=audit_path, secret_key=db_key)
 	return AppServices(
@@ -109,7 +111,6 @@ class SecureFaceRecognitionApp(ctk.CTk):
 		nav_items = [
 			("Recognition", "recognition"),
 			("Enrollment", "enrollment"),
-			("Liveness", "liveness"),
 			("Audit", "audit"),
 			("Settings", "settings"),
 			("Evaluation", "evaluation"),

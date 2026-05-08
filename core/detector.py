@@ -17,6 +17,7 @@ class DetectionResult:
 	bbox: tuple[int, int, int, int]
 	score: float
 	face: np.ndarray
+	embedding: Optional[np.ndarray] = None
 	landmarks: Optional[np.ndarray] = None
 
 
@@ -126,6 +127,9 @@ class FaceDetector:
 			raise DetectionError("Detected face does not provide a bounding box")
 		cropped = crop_face(image, bbox, margin=self.margin)
 		score = float(getattr(face, "det_score", getattr(face, "score", 0.0)))
+		embedding = getattr(face, "embedding", None)
+		if embedding is not None:
+			embedding = np.asarray(embedding, dtype=np.float32)
 		landmarks = getattr(face, "landmark", None)
 		if landmarks is not None:
 			landmarks = np.asarray(landmarks)
@@ -133,6 +137,7 @@ class FaceDetector:
 			bbox=tuple(int(round(value)) for value in np.asarray(bbox).tolist()),
 			score=score,
 			face=cropped,
+			embedding=embedding,
 			landmarks=landmarks,
 		)
 

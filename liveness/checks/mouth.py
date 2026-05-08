@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
+import os
+
 import numpy as np
+
+
+def _debug_enabled() -> bool:
+	return os.getenv("LIVENESS_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _debug_print(message: str) -> None:
+	if _debug_enabled():
+		print(message)
 
 
 class MouthDetectionError(ValueError):
@@ -48,5 +59,7 @@ def evaluate_mouth_open(
 	mar = mouth_aspect_ratio(points)
 	if threshold is None:
 		threshold = 0.5
-	return mouth_open(mar, threshold)
+	passed = mouth_open(mar, threshold)
+	_debug_print(f"[DEBUG] evaluate_mouth_open: MAR={mar:.3f}, threshold={threshold:.3f} => {'PASS' if passed else 'FAIL'}")
+	return passed
 

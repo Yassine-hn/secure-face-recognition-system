@@ -11,9 +11,25 @@ class FakeDetector:
         return frame["face"]
 
 
+class FakeDetectionResult:
+    def __init__(self, embedding):
+        self.embedding = embedding
+        self.face = np.array([9.0, 9.0, 9.0], dtype=np.float32)
+
+
+class FakeDetectorWithEmbedding:
+    def detect(self, frame):
+        return FakeDetectionResult(frame["embedding"])
+
+
 class FakeEmbedder:
     def extract_embedding(self, face):
         return face
+
+
+class FailingEmbedder:
+    def extract_embedding(self, face):
+        raise RuntimeError("embedder should not be called when detector returns embedding")
 
 
 class TestRecognitionService(unittest.TestCase):
@@ -42,6 +58,17 @@ class TestRecognitionService(unittest.TestCase):
         self.assertFalse(result.accepted)
         self.assertIsNone(result.student_id)
         self.assertIsNotNone(result.match)
+
+    def test_recognize_uses_detector_embedding_when_available(self) -> None:
+        service = RecognitionService(
+            detector=FakeDetectorWithEmbedding(),
+            embedder=FailingEmbedder(),
+            matcher=self.matcher,
+        )
+        frame = {"embedding": np.array([1.0, 0.0, 0.0], dtype=np.float32)}
+        result = service.recognize(frame, self.enrolled)
+        self.assertTrue(result.accepted)
+        self.assertEqual(result.student_id, "student-1")
 
 
 if __name__ == "__main__":
