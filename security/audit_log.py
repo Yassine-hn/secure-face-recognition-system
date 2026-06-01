@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import json
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 
 class AuditLogError(RuntimeError):
@@ -62,6 +62,52 @@ def _read_json_lines(log_path: Path) -> list[dict[str, Any]]:
 	return entries
 
 
+def _read_json_lines_from_end(log_path: Path, count: int) -> list[dict[str, Any]]:
+	if count <= 0 or not log_path.exists():
+		return []
+
+	block_size = 8192
+	collected: list[bytes] = []
+	buffer = b""
+	with log_path.open("rb") as file:
+		file.seek(0, 2)
+		position = file.tell()
+		while position > 0 and len(collected) < count:
+			read_size = min(block_size, position)
+			position -= read_size
+			file.seek(position)
+			chunk = file.read(read_size)
+			buffer = chunk + buffer
+			parts = buffer.splitlines()
+			if position > 0:
+				buffer = parts[0] if parts else b""
+				complete_lines = parts[1:]
+			else:
+				buffer = b""
+				complete_lines = parts
+
+			for line in reversed(complete_lines):
+				if not line.strip():
+					continue
+				collected.insert(0, line)
+				if len(collected) >= count:
+					break
+
+		if position == 0 and buffer.strip() and len(collected) < count:
+			collected.insert(0, buffer)
+
+	parsed: list[dict[str, Any]] = []
+	for line in collected:
+		try:
+			entry = json.loads(line.decode("utf-8"))
+		except json.JSONDecodeError as exc:
+			raise AuditLogIntegrityError("Invalid JSON while reading recent audit entries") from exc
+		if not isinstance(entry, dict):
+			raise AuditLogIntegrityError("Invalid entry type while reading recent audit entries")
+		parsed.append(entry)
+	return parsed
+
+
 def verify_audit_chain(log_path: str | Path, secret_key: str | bytes) -> bool:
 	"""Verify full HMAC chain and raise AuditLogIntegrityError on tampering."""
 	key = _normalize_key(secret_key)
@@ -106,6 +152,9 @@ class AuditLogger:
 
 	def read_entries(self) -> list[dict[str, Any]]:
 		return _read_json_lines(self._path)
+
+	def read_entries_page(self, page_size: int = 10, page_index: int = 0) -> tuple[list[dict[str, Any]], bool]:
+		return read_entries_page(self._path, page_size=page_size, page_index=page_index)
 
 	def append_event(
 		self,
@@ -163,6 +212,33 @@ def append_event(
 	)
 
 
-def read_entries(log_path: str | Path) -> Iterable[dict[str, Any]]:
-	"""Convenience functional API for loading entries."""
+def read_entries(log_path: str | Path) -> list[dict[str, Any]]:
+	"""Convenience functional API for loading all entries."""
 	return _read_json_lines(Path(log_path))
+
+
+def read_entries_page(
+	log_path: str | Path,
+	page_size: int = 10,
+	page_index: int = 0,
+) -> tuple[list[dict[str, Any]], bool]:
+	"""Load one page of entries from the end of the log.
+
+	Returns (entries, has_next_page). Page 0 is the newest page.
+	"""
+	if page_size <= 0 or page_index < 0:
+		return [], False
+
+	path = Path(log_path)
+	offset = page_index * page_size
+	window = _read_json_lines_from_end(path, offset + page_size + 1)
+	if len(window) <= offset:
+		return [], False
+
+	page_window = window[:-offset] if offset else window
+	has_next = len(page_window) > page_size
+	if has_next:
+		page_rows = page_window[1 : page_size + 1]
+	else:
+		page_rows = page_window[:page_size]
+	return page_rows, has_next

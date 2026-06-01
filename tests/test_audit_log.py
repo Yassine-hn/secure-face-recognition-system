@@ -9,6 +9,7 @@ from security.audit_log import (
 	append_event,
 	hash_student_id,
 	read_entries,
+	read_entries_page,
 	verify_audit_chain,
 )
 
@@ -73,6 +74,29 @@ class TestAuditLog(unittest.TestCase):
 		self.assertEqual(len(entries), 1)
 		self.assertEqual(entries[0]["result"], "DENIED")
 		self.assertEqual(entries[0]["metadata"]["reason"], "liveness_failed")
+
+	def test_paged_read_returns_ten_entries_and_next_flag(self) -> None:
+		logger = AuditLogger(log_path=self.log_path, secret_key=self.secret_key)
+		for index in range(1, 26):
+			logger.append_event(
+				result="GRANTED" if index % 2 == 0 else "DENIED",
+				student_id=f"S{index:03d}",
+				session_token=f"token-{index}",
+			)
+
+		page1, has_next1 = read_entries_page(self.log_path, page_size=10, page_index=0)
+		page2, has_next2 = read_entries_page(self.log_path, page_size=10, page_index=1)
+		page3, has_next3 = read_entries_page(self.log_path, page_size=10, page_index=2)
+
+		self.assertEqual(len(page1), 10)
+		self.assertEqual(len(page2), 10)
+		self.assertEqual(len(page3), 5)
+		self.assertTrue(has_next1)
+		self.assertTrue(has_next2)
+		self.assertFalse(has_next3)
+		self.assertEqual([row["session_token"] for row in page1], [f"token-{index}" for index in range(16, 26)])
+		self.assertEqual([row["session_token"] for row in page2], [f"token-{index}" for index in range(6, 16)])
+		self.assertEqual([row["session_token"] for row in page3], [f"token-{index}" for index in range(1, 6)])
 
 
 if __name__ == "__main__":
