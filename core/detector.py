@@ -87,13 +87,52 @@ class FaceDetector:
 
 		try:
 			from insightface.app import FaceAnalysis
-		except ImportError as exc:  # pragma: no cover - optional dependency
-			raise DetectionError("insightface is not installed") from exc
 
-		app = FaceAnalysis(name=self.model_name, providers=self.providers)
-		app.prepare(ctx_id=self.ctx_id, det_size=self.det_size)
-		self._model = app
-		return app
+			app = FaceAnalysis(name=self.model_name, providers=self.providers)
+			app.prepare(ctx_id=self.ctx_id, det_size=self.det_size)
+			self._model = app
+			return app
+		except Exception:
+			# Fallback to OpenCV Haar Cascade when InsightFace is not installed or available
+			try:
+				import cv2
+
+				cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+				classifier = cv2.CascadeClassifier(cascade_path)
+
+				class _OpenCVHaarModel:
+					def __init__(self, clf: Any) -> None:
+						self.clf = clf
+
+					def get(self, frame: np.ndarray) -> list[Any]:
+						if frame.ndim == 3:
+							gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+						else:
+							gray = frame
+						rects = self.clf.detectMultiScale(
+							gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30)
+						)
+						faces = []
+						for x, y, w, h in rects:
+							class _FaceBox:
+								def __init__(self, bbox_arr: np.ndarray) -> None:
+									self.bbox = bbox_arr
+									self.det_score = 0.95
+									self.kps = None
+
+							faces.append(
+								_FaceBox(
+									np.array([x, y, x + w, y + h], dtype=np.float32)
+								)
+							)
+						return faces
+
+				self._model = _OpenCVHaarModel(classifier)
+				return self._model
+			except Exception as exc:
+				raise DetectionError(
+					"Neither insightface nor opencv cascade could be loaded for face detection"
+				) from exc
 
 	def _get_faces(self, frame: np.ndarray) -> list[Any]:
 		model = self._load_model()

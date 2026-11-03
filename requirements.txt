@@ -26,7 +26,8 @@ matplotlib==3.8.4           # ROC curve rendering in eval_screen and reports
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 customtkinter==5.2.2        # Modern flat-design Python desktop GUI
-Pillow==10.3.0              # Converts OpenCV BGR frames to CTk-displayable format
+streamlit>=1.30.0           # Interactive Web UI for cloud hosting & demo
+Pillow==10.3.0              # Converts OpenCV BGR frames to displayable format
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==8.1.1               # Test runner for all unit tests

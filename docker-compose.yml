@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  sfrs-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sfrs-web-dashboard
+    ports:
+      - "7860:7860"
+    environment:
+      - SFRS_MODE=development
+      - PORT=7860
+      - DB_KEY=secure-demo-master-key-32-chars!
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

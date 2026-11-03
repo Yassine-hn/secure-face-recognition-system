@@ -6,4 +6,9 @@ models/*.pt
 models/*.pth
 __pycache__/
 .venv/
+.pytest_cache/
+.coverage
+dist/
+build/
+*.egg-info/
 docs/camera_feed_fix_local.md

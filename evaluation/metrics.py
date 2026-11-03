@@ -132,5 +132,8 @@ def roc_auc(fpr: Iterable[float], tpr: Iterable[float]) -> float:
 	if fpr_arr.shape != tpr_arr.shape:
 		raise MetricsError("fpr and tpr must have the same shape")
 	order = np.argsort(fpr_arr)
-	return float(np.trapz(tpr_arr[order], fpr_arr[order]))
+	trapz_fn = getattr(np, "trapezoid", getattr(np, "trapz", None))
+	if trapz_fn is None:
+		from scipy.integrate import trapezoid as trapz_fn
+	return float(trapz_fn(tpr_arr[order], fpr_arr[order]))
 
