@@ -192,6 +192,10 @@ class EnrollmentDatabase:
 		self._connection.execute("DELETE FROM enrollments")
 		self._connection.commit()
 
+	# Aliases for convenience
+	list_records = list_enrollments
+	delete_record = delete_enrollment
+
 
 def create_database(db_path: str | Path, db_key: str | None = None) -> EnrollmentDatabase:
 	return EnrollmentDatabase(db_path=db_path, db_key=db_key)

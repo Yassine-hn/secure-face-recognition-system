@@ -21,7 +21,7 @@ import streamlit as st
 
 from core.services import AppServices, build_default_services
 from evaluation.metrics import compute_eer, roc_auc, roc_curve_points
-from security.audit_log import verify_chain_integrity
+from security.audit_log import verify_audit_chain
 
 
 # ── Page Configuration & Theming ─────────────────────────────────────────────
@@ -125,7 +125,7 @@ with st.sidebar:
 	st.markdown("---")
 
 	# Runtime status
-	enrolled_records = list(services.database.list_records())
+	enrolled_records = list(services.database.list_enrollments())
 	st.metric("Enrolled Identities", len(enrolled_records))
 
 	st.markdown("### Security Parameters")
@@ -157,8 +157,7 @@ with st.sidebar:
 
 	st.markdown("---")
 	if st.button("🗑️ Reset Demo Database", help="Clear all enrolled student templates"):
-		for rec in enrolled_records:
-			services.database.delete_record(rec.student_id)
+		services.database.clear()
 		st.success("Database cleared!")
 		st.rerun()
 
@@ -252,7 +251,7 @@ with tabs[0]:
 				st.warning("⚠️ No valid face region detected. Please look directly at the camera.")
 			else:
 				# Run recognition against enrolled DB
-				enrolled_map = {rec.student_id: rec.template for rec in services.database.list_records()}
+				enrolled_map = {rec.student_id: rec.template for rec in services.database.list_enrollments()}
 				if not enrolled_map:
 					st.warning("ℹ️ No students enrolled in the database yet. Please enroll in the 'Student Enrollment' tab first!")
 				else:
@@ -346,7 +345,7 @@ with tabs[1]:
 
 	st.markdown("---")
 	st.markdown("### 📋 Enrolled Student Registry")
-	current_records = list(services.database.list_records())
+	current_records = list(services.database.list_enrollments())
 	if current_records:
 		records_data = []
 		for r in current_records:
@@ -362,7 +361,7 @@ with tabs[1]:
 
 		del_id = st.selectbox("Select Student ID to Revoke / Delete:", [r.student_id for r in current_records])
 		if st.button(f"🗑️ Revoke Template for {del_id}", help="Demonstrates template revocability without compromising raw biometrics"):
-			services.database.delete_record(del_id)
+			services.database.delete_enrollment(del_id)
 			services.audit_logger.log_event("REVOCATION", "GRANTED", del_id, {"action": "template_revoked"})
 			st.success(f"Template for {del_id} revoked and erased.")
 			st.rerun()
@@ -425,9 +424,11 @@ with tabs[3]:
 	with col_verify:
 		# Verify HMAC chain
 		if entries:
-			# Verify chain
-			secret_key = services.audit_logger.secret_key
-			is_chain_valid = verify_chain_integrity(services.audit_logger.log_path, secret_key=secret_key)
+			try:
+				is_chain_valid = services.audit_logger.verify()
+			except Exception:
+				is_chain_valid = False
+
 			if is_chain_valid:
 				st.markdown('<span class="badge-success">🔒 HMAC CHAIN VALID — 0 TAMPERING DETECTED</span>', unsafe_allow_html=True)
 			else:

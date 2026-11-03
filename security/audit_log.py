@@ -138,6 +138,10 @@ def verify_audit_chain(log_path: str | Path, secret_key: str | bytes) -> bool:
 	return True
 
 
+# Alias for backward compatibility
+verify_chain_integrity = verify_audit_chain
+
+
 @dataclass
 class AuditLogger:
 	"""Append and verify tamper-evident audit events."""
@@ -188,6 +192,25 @@ class AuditLogger:
 
 	def verify(self) -> bool:
 		return verify_audit_chain(self._path, self._key)
+
+	def log_event(
+		self,
+		activity_type: Optional[str] = None,
+		result: str = "GRANTED",
+		student_id: Optional[str] = None,
+		session_token: Optional[str] = None,
+		metadata: Optional[dict[str, Any]] = None,
+		timestamp: Optional[str] = None,
+	) -> dict[str, Any]:
+		"""Convenience alias for append_event with activity_type first."""
+		return self.append_event(
+			result=result,
+			student_id=student_id,
+			session_token=session_token,
+			metadata=metadata,
+			timestamp=timestamp,
+			activity_type=activity_type,
+		)
 
 
 def append_event(
