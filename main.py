@@ -34,11 +34,33 @@ def _parse_args() -> argparse.Namespace:
 
 
 def run_web_app(port: int = 7860) -> None:
-	"""Launch the Streamlit web application."""
+	"""Launch the Streamlit web application and open in browser."""
+	import threading
+	import time
+	import webbrowser
+
 	web_app = Path(__file__).parent / "web" / "app.py"
 	if not web_app.exists():
 		print(f"Error: Web app file not found at {web_app}", file=sys.stderr)
 		sys.exit(1)
+
+	url = f"http://localhost:{port}"
+
+	def _open_browser() -> None:
+		time.sleep(1.5)
+		try:
+			webbrowser.open(url)
+		except Exception:
+			pass
+
+	threading.Thread(target=_open_browser, daemon=True).start()
+
+	print("\n" + "=" * 70)
+	print("🚀 Secure Face Recognition Web Interface")
+	print(f"   👉 URL: {url}")
+	print("   👉 Opening in your web browser automatically...")
+	print("   👉 Press Ctrl+C in this terminal to stop.")
+	print("=" * 70 + "\n")
 
 	cmd = [
 		sys.executable,
@@ -50,10 +72,7 @@ def run_web_app(port: int = 7860) -> None:
 		str(port),
 		"--server.address",
 		"0.0.0.0",
-		"--server.headless",
-		"true",
 	]
-	print(f"Starting Secure Face Recognition Web Interface on http://localhost:{port}")
 	sys.exit(subprocess.call(cmd))
 
 
