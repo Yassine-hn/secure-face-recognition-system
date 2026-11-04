@@ -289,8 +289,13 @@ def get_webcam_stream() -> WebcamManager:
 
 def get_camera_source_options() -> tuple[list[str], int]:
 	"""Return available frame sources and the smart default index based on hardware availability."""
-	cam = get_webcam_stream()
-	if cam.is_available():
+	try:
+		cam = get_webcam_stream()
+		is_avail = bool(callable(getattr(cam, "is_available", None)) and cam.is_available())
+	except Exception:
+		is_avail = False
+
+	if is_avail:
 		return ["Live Camera (Webcam)", "Sample Identity (Demo)", "Browser Camera (Webcam)", "Upload Image"], 0
 	else:
 		return ["Sample Identity (Demo)", "Browser Camera (Webcam)", "Upload Image", "Live Camera (Local Device)"], 0
