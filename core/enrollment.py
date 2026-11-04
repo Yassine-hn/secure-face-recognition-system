@@ -207,3 +207,6 @@ class EnrollmentService:
 			return None
 		return self.transformer.rotate(seed=seed)
 
+	# Alias for convenience
+	enroll_student = enroll_embedding
+

@@ -75,7 +75,7 @@ class ActiveLivenessOrchestrator:
 		self.window_seconds = float(window_seconds)
 		self.rng = rng or random.Random()
 
-	def create_session(self) -> ActiveLivenessSession:
+	def create_session(self, window_seconds: Optional[float] = None) -> ActiveLivenessSession:
 		if self.min_challenges <= 0:
 			raise ActiveLivenessError("min_challenges must be positive")
 		if self.max_challenges < self.min_challenges:
@@ -83,13 +83,14 @@ class ActiveLivenessOrchestrator:
 		if len(self.challenge_pool) < self.min_challenges:
 			raise ActiveLivenessError("challenge pool is too small")
 
+		win = float(window_seconds) if window_seconds is not None else self.window_seconds
 		count = self.rng.randint(self.min_challenges, min(self.max_challenges, len(self.challenge_pool)))
 		selected = tuple(self.rng.sample(list(self.challenge_pool), count))
 		created_at = datetime.now(timezone.utc).isoformat()
 		return ActiveLivenessSession(
 			token=generate_session_token(created_at),
 			challenge_names=selected,
-			window_seconds=self.window_seconds,
+			window_seconds=win,
 			created_at=created_at,
 		)
 

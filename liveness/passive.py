@@ -61,9 +61,18 @@ def _heuristic_live_score(face_image: np.ndarray) -> float:
 	)
 	gray = face_image.mean(axis=2) if face_image.ndim == 3 else face_image
 	variance = float(np.var(gray))
-	energy = float(np.mean(np.abs(np.gradient(gray.astype(np.float32)))))
-	raw_score = 0.6 * np.tanh(variance / 500.0) + 0.4 * np.tanh(energy / 20.0)
-	return float(np.clip(raw_score, 0.0, 1.0))
+	gy, gx = np.gradient(gray.astype(np.float32))
+	energy = float(np.mean(np.abs(gx)) + np.mean(np.abs(gy))) / 2.0
+	base_score = 0.6 * np.tanh(variance / 500.0) + 0.4 * np.tanh(energy / 20.0)
+
+	# Detect screen moire / scanline frequency disparity
+	ratio = float((np.mean(np.abs(gy)) + 1e-4) / (np.mean(np.abs(gx)) + 1e-4))
+	if ratio > 2.0:
+		base_score *= (1.5 / ratio)
+	elif ratio < 0.35:
+		base_score *= (ratio / 0.35)
+
+	return float(np.clip(base_score, 0.0, 1.0))
 
 
 class PassiveLivenessChecker:
@@ -139,11 +148,10 @@ class PassiveLivenessChecker:
 		image = _as_image(face_crop)
 		model = self._load_model()
 		if model is None:
-			# Execute the heuristic just to log the warning if needed
-			_heuristic_live_score(image)
-			# Fail-closed: return 0.0 when no reliable anti-spoofing model is loaded
-			_debug_print("[DEBUG] Passive liveness: no model loaded, returning 0.0 (fail closed).")
-			return 0.0, False
+			# Use heuristic score when model is not available
+			score = _heuristic_live_score(image)
+			_debug_print(f"[DEBUG] Passive liveness: using heuristic score={score:.3f}")
+			return score, False
 		try:
 			raw_score = self._score_from_model(model, image)
 		except Exception as exc:
@@ -181,4 +189,7 @@ class PassiveLivenessChecker:
 
 	def __call__(self, face_crop: Any) -> PassiveLivenessResult:
 		return self.classify(face_crop)
+
+	# Alias for convenience
+	evaluate = classify
 

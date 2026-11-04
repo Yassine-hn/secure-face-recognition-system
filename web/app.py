@@ -83,9 +83,20 @@ st.markdown(
 )
 
 
-@st.cache_resource
+import importlib
+import sys
+
+# Ensure fresh service modules on hot reload
+for _mod_name in ["liveness.passive", "liveness.active", "core.services", "core.detector", "core.embedder", "security.audit_log", "security.database"]:
+	if _mod_name in sys.modules:
+		try:
+			importlib.reload(sys.modules[_mod_name])
+		except Exception:
+			pass
+
+
 def load_app_services() -> AppServices:
-	"""Load and cache system backend services."""
+	"""Load and initialize system backend services."""
 	root_dir = Path(__file__).resolve().parents[1]
 	return build_default_services(base_dir=root_dir)
 
@@ -116,6 +127,14 @@ def draw_detection_box(frame_bgr: np.ndarray, bbox: tuple[int, int, int, int], l
 	cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
 	cv2.putText(annotated, label, (x1, max(24, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 	return cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+
+
+def hash_template_bytes(template: Any) -> str:
+	"""Return SHA-256 hex digest of a template vector."""
+	import hashlib
+
+	arr = np.asarray(template, dtype=np.float32)
+	return hashlib.sha256(arr.tobytes()).hexdigest()
 
 
 # ── Sidebar: System Controls & Health ─────────────────────────────────────────
@@ -217,7 +236,7 @@ with tabs[0]:
 		else:
 			# Step 1: Passive Liveness
 			with st.spinner("Running Anti-Spoofing & Liveness Check..."):
-				passive_result = services.passive_liveness.evaluate(bgr_image)
+				passive_result = services.passive_liveness.classify(bgr_image)
 
 			col_liveness1, col_liveness2 = st.columns(2)
 			with col_liveness1:
@@ -231,7 +250,7 @@ with tabs[0]:
 
 			# Step 2: Face Detection
 			try:
-				detected = services.detector.detect_face(bgr_image)
+				detected = services.detector.detect(bgr_image)
 				annotated_rgb = draw_detection_box(bgr_image, detected.bbox, "Live Face" if is_live else "Potential Spoof", is_live)
 				st.image(annotated_rgb, caption="Detected Face ROI", use_container_width=True)
 			except Exception as exc:
@@ -260,7 +279,7 @@ with tabs[0]:
 						transformed_query = services.transformer.transform(query_emb)
 						match = services.matcher.find_best_match(transformed_query, enrolled_map)
 
-					template_hash = services.transformer.hash_template(transformed_query)[:16]
+					template_hash = hash_template_bytes(transformed_query)[:16]
 					st.caption(f"**Cancelable Template SHA-256:** `{template_hash}...` (Irreversible)")
 
 					if match.is_match and match.student_id is not None:
@@ -303,14 +322,31 @@ with tabs[1]:
 		st.caption("✅ Encrypted with SQLCipher AES-256 at rest")
 
 	with col_cam:
-		enroll_mode = st.radio("Capture Method:", ["Camera", "Upload File"], horizontal=True, key="enroll_radio")
+		enroll_mode = st.radio("Capture Method:", ["Camera", "Upload File", "Use Demo Sample Face"], horizontal=True, key="enroll_radio")
 		enroll_bgr = None
 		if enroll_mode == "Camera":
 			enroll_file = st.camera_input("Capture Enrollment Photo")
 			enroll_bgr = frame_to_bgr(enroll_file)
-		else:
+		elif enroll_mode == "Upload File":
 			enroll_up = st.file_uploader("Upload Profile Image", type=["jpg", "png", "jpeg"], key="enroll_uploader")
 			enroll_bgr = frame_to_bgr(enroll_up)
+		else:
+			sample_dir = Path(__file__).parent / "sample_faces"
+			sample_files = list(sample_dir.glob("*.jpg"))
+			if sample_files:
+				selected_enroll_sample = st.selectbox(
+					"Select Sample to Enroll:",
+					sample_files,
+					format_func=lambda p: p.stem.replace("_", " ").title(),
+					key="enroll_sample_select",
+				)
+				if selected_enroll_sample:
+					enroll_bgr = cv2.imread(str(selected_enroll_sample))
+					st.image(
+						cv2.cvtColor(enroll_bgr, cv2.COLOR_BGR2RGB),
+						caption=f"Selected: {selected_enroll_sample.name}",
+						width=200,
+					)
 
 	if st.button("🚀 Enroll Student", type="primary"):
 		if not student_id.strip():
@@ -320,13 +356,14 @@ with tabs[1]:
 		else:
 			try:
 				# Liveness check first
-				liveness_res = services.passive_liveness.evaluate(enroll_bgr)
+				liveness_res = services.passive_liveness.classify(enroll_bgr)
 				if liveness_res.score < passive_thresh:
 					st.error(f"Enrollment rejected: Image failed anti-spoofing check (score: {liveness_res.score:.2f})")
 				else:
-					det = services.detector.detect_face(enroll_bgr)
+					det = services.detector.detect(enroll_bgr)
 					embedding = services.embedder.extract_embedding(det.face)
-					services.enrollment.enroll_student(
+					enroll_fn = getattr(services.enrollment, "enroll_student", getattr(services.enrollment, "enroll_embedding", None))
+					enroll_fn(
 						student_id=student_id.strip(),
 						embedding=embedding,
 						metadata={"name": student_name, "department": department},
@@ -386,7 +423,7 @@ with tabs[2]:
 			test_bgr = frame_to_bgr(test_file)
 			if test_bgr is not None:
 				st.image(cv2.cvtColor(test_bgr, cv2.COLOR_BGR2RGB), caption="Test Image", width=280)
-				res = services.passive_liveness.evaluate(test_bgr)
+				res = services.passive_liveness.classify(test_bgr)
 				st.metric("Anti-Spoofing Live Confidence", f"{res.score * 100:.1f}%")
 				if res.score >= passive_thresh:
 					st.success("Verdict: LIVE HUMAN")
@@ -398,7 +435,7 @@ with tabs[2]:
 		st.caption("Issues non-deterministic behavioral challenges within strict time windows (3s) to defeat pre-recorded video injection.")
 
 		if st.button("🎲 Generate Dynamic Challenge Session"):
-			session = services.active_liveness.create_session(window_seconds=4.0)
+			session = services.active_liveness.create_session()
 			st.session_state["active_session"] = session
 
 		if "active_session" in st.session_state:

@@ -96,3 +96,10 @@ class CancelableTransformer:
 		self.seed = seed
 		self._projection_matrix = generate_projection_matrix(self.embedding_dim, seed)
 		return self.projection_matrix
+
+	@staticmethod
+	def hash_template(template: np.ndarray | Iterable[float]) -> str:
+		"""Return SHA-256 hex digest of a template vector."""
+		import hashlib
+		arr = np.asarray(template, dtype=np.float32)
+		return hashlib.sha256(arr.tobytes()).hexdigest()

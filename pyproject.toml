@@ -23,3 +23,8 @@ include-package-data = true
 [tool.setuptools.packages.find]
 include = ["core*", "evaluation*", "liveness*", "security*", "ui*"]
 exclude = ["tests*", "data*", "models*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+

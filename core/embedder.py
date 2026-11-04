@@ -87,17 +87,39 @@ class FaceEmbedder:
 						def __init__(self, face_mat: np.ndarray) -> None:
 							import cv2
 
-							if face_mat.ndim == 3:
-								gray = cv2.cvtColor(face_mat, cv2.COLOR_BGR2GRAY)
+							mat = np.asarray(face_mat)
+							gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY) if mat.ndim == 3 else mat
+							resized = cv2.resize(gray, (112, 112)).astype(np.float32) / 255.0
+
+							# 1. Spatial 8x8 cell stats (128 features)
+							h, w = resized.shape
+							blocks: list[float] = []
+							for r in range(0, h, 14):
+								for c in range(0, w, 14):
+									cell = resized[r : r + 14, c : c + 14]
+									blocks.append(float(np.mean(cell)))
+									blocks.append(float(np.std(cell)))
+							spatial_feats = np.asarray(blocks[:128], dtype=np.float32)
+
+							# 2. DCT AC coefficients (256 features, zero DC for illumination invariance)
+							dct = cv2.dct(resized)
+							dct[0, 0] = 0.0
+							ac_feats = dct[:16, :16].flatten()[:256]
+
+							# 3. Color distribution (128 features)
+							if mat.ndim == 3:
+								hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
+								hist_h = cv2.calcHist([hsv], [0], None, [64], [0, 180]).flatten()
+								hist_s = cv2.calcHist([hsv], [1], None, [64], [0, 256]).flatten()
+								color_feats = np.concatenate([hist_h, hist_s]).astype(np.float32)
 							else:
-								gray = face_mat
-							resized = cv2.resize(gray, (112, 112))
-							dct = cv2.dct(np.float32(resized) / 255.0)
-							features = dct[:23, :23].flatten()[:512]
-							if len(features) < 512:
-								features = np.pad(features, (0, 512 - len(features)))
-							norm = float(np.linalg.norm(features))
-							self.embedding = (features / (norm + 1e-8)).astype(np.float32)
+								color_feats = np.zeros(128, dtype=np.float32)
+
+							combined = np.concatenate([spatial_feats, ac_feats, color_feats])[:512]
+							if len(combined) < 512:
+								combined = np.pad(combined, (0, 512 - len(combined)))
+							norm = float(np.linalg.norm(combined))
+							self.embedding = (combined / (norm + 1e-8)).astype(np.float32)
 							self.det_score = 0.95
 
 					return [_FaceWithEmb(img)]
