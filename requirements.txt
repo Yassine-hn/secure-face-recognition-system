@@ -1,12 +1,16 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
+# ── Core build & computation ──────────────────────────────────────────────────
+numpy==1.26.4
+cython>=3.0.0
+
 # ── Face detection & recognition ──────────────────────────────────────────────
 insightface==0.7.3          # RetinaFace (detection) + ArcFace (recognition)
 onnxruntime==1.17.1         # ONNX runtime backend for InsightFace models
 opencv-python-headless==4.9.0.80  # Headless camera capture & image preprocessing
 
 # ── Liveness detection ────────────────────────────────────────────────────────
-mediapipe==0.10.11          # 468-point Face Mesh — EAR, MAR, head pose, iris tracking
+mediapipe>=0.10.11,<=0.10.20 # 468-point Face Mesh — EAR, MAR, head pose, iris tracking
 torch==2.2.2+cpu; sys_platform == 'linux'
 torchvision==0.17.2+cpu; sys_platform == 'linux'
 torch==2.2.2; sys_platform != 'linux'
@@ -19,8 +23,7 @@ cryptography==42.0.5        # Fernet — supplementary AES ops if needed
 keyring==25.2.1             # OS credential store — DB key never written to disk
 python-dotenv==1.0.1        # Loads .env variables at runtime
 
-# ── Data & computation ────────────────────────────────────────────────────────
-numpy==1.26.4               # Embedding vectors, projection matrix, arithmetic
+# ── Data & evaluation ─────────────────────────────────────────────────────────
 scikit-learn==1.4.2         # Cosine similarity, ROC curve, EER, confusion matrix
 pandas==2.2.1               # Benchmark tabulation, CSV export of audit log
 matplotlib==3.8.4           # ROC curve rendering in reports
