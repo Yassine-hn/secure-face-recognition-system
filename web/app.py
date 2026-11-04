@@ -87,6 +87,15 @@ st.markdown(
 )
 
 
+# Synchronize Streamlit secrets into os.environ if running on Streamlit Cloud
+try:
+	for secret_key, secret_val in st.secrets.items():
+		if isinstance(secret_val, str) and secret_key not in os.environ:
+			os.environ[secret_key] = secret_val
+except Exception:
+	pass
+
+
 @st.cache_resource
 def get_services() -> AppServices:
 	"""Initialize and cache the backend application services container."""

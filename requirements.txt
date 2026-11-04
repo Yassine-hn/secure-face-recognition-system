@@ -21,6 +21,7 @@ scipy==1.13.0               # Euclidean distance for EAR/MAR landmark pairs
 sqlcipher3-binary==0.6.0    # AES-256 encrypted SQLite (precompiled SQLCipher binary)
 cryptography==42.0.5        # Fernet — supplementary AES ops if needed
 keyring==25.2.1             # OS credential store — DB key never written to disk
+keyrings.alt==5.0.2         # Headless file-backed keyring fallback for cloud/containers
 python-dotenv==1.0.1        # Loads .env variables at runtime
 
 # ── Data & evaluation ─────────────────────────────────────────────────────────

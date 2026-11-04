@@ -44,6 +44,33 @@ class TestKeyManagerHelpers(unittest.TestCase):
         finally:
             os.environ.pop("DB_KEY", None)
 
+    def test_get_db_key_uses_env_when_available(self) -> None:
+        from security.key_manager import get_db_key
+        os.environ["DB_KEY"] = "custom-test-secret"
+        try:
+            self.assertEqual(
+                get_db_key(service_name="test_service_unused", username="test_user_unused"),
+                "custom-test-secret"
+            )
+        finally:
+            os.environ.pop("DB_KEY", None)
+
+    def test_get_db_key_uses_demo_fallback_in_dev_mode(self) -> None:
+        from security.key_manager import get_db_key
+        old_key = os.environ.pop("DB_KEY", None)
+        old_mode = os.environ.get("SFRS_MODE")
+        os.environ["SFRS_MODE"] = "development"
+        try:
+            key = get_db_key(service_name="nonexistent_service_12345", username="user_none")
+            self.assertTrue(len(key) > 0)
+        finally:
+            if old_key is not None:
+                os.environ["DB_KEY"] = old_key
+            if old_mode is not None:
+                os.environ["SFRS_MODE"] = old_mode
+            else:
+                os.environ.pop("SFRS_MODE", None)
+
 
 class TestEnrollmentDatabase(unittest.TestCase):
     def setUp(self) -> None:
