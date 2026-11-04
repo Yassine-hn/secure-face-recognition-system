@@ -42,9 +42,9 @@ class SecureFaceRecognitionApp(ctk.CTk):
 		nav_items = [
 			("Recognition", "recognition"),
 			("Enrollment", "enrollment"),
+			("Liveness", "liveness"),
 			("Audit", "audit"),
 			("Settings", "settings"),
-			("Evaluation", "evaluation"),
 		]
 		for label, screen_name in nav_items:
 			button = ctk.CTkButton(self.sidebar, text=label, command=lambda name=screen_name: self.show_screen(name))
@@ -53,7 +53,6 @@ class SecureFaceRecognitionApp(ctk.CTk):
 	def _create_screen(self, name: str) -> ctk.CTkFrame:
 		from ui.audit_screen import AuditScreen
 		from ui.enrollment_screen import EnrollmentScreen
-		from ui.eval_screen import EvaluationScreen
 		from ui.liveness_screen import LivenessScreen
 		from ui.recognition_screen import RecognitionScreen
 		from ui.settings_screen import SettingsScreen
@@ -64,7 +63,6 @@ class SecureFaceRecognitionApp(ctk.CTk):
 			"liveness": lambda master: LivenessScreen(master, services=self.services),
 			"audit": lambda master: AuditScreen(master, services=self.services),
 			"settings": lambda master: SettingsScreen(master, services=self.services),
-			"evaluation": lambda master: EvaluationScreen(master, services=self.services),
 		}
 		factory = factories.get(name)
 		if factory is None:

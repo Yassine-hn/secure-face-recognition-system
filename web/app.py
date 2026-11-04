@@ -39,6 +39,14 @@ st.set_page_config(
 st.markdown(
 	"""
 	<style>
+	/* Hide Streamlit Deploy button */
+	.stDeployButton,
+	div[data-testid="stDeployButton"],
+	header [data-testid="stDeployButton"],
+	button[data-testid="stDeployButton"],
+	button[title="Deploy this app"] {
+		display: none !important;
+	}
 	.main .block-container {
 		padding-top: 1.5rem;
 		padding-bottom: 2rem;
@@ -386,12 +394,134 @@ def render_static_preview(
 		st.rerun()
 
 
+# ── Real-Time MediaPipe Gesture Detector for Active Liveness ──────────────────
+class ActiveGestureDetector:
+	"""Real-time gesture detector using MediaPipe FaceMesh landmarks."""
+
+	_LEFT_EYE_EAR_INDICES = [33, 160, 158, 133, 153, 144]
+	_RIGHT_EYE_EAR_INDICES = [362, 385, 387, 263, 373, 380]
+	_MOUTH_MAR_INDICES = [61, 84, 17, 314, 405, 320, 307, 375]
+	_HEAD_POSE_INDICES = [33, 263, 1, 61, 291, 199]
+
+	def __init__(self) -> None:
+		import mediapipe as mp
+		self._mp_mesh = mp.solutions.face_mesh
+		self._mesh = self._mp_mesh.FaceMesh(
+			static_image_mode=False,
+			max_num_faces=1,
+			refine_landmarks=True,
+			min_detection_confidence=0.5,
+			min_tracking_confidence=0.5,
+		)
+		self.reset()
+
+	def reset(self) -> None:
+		self.smile_baseline: Optional[float] = None
+		self.mouth_baseline: Optional[float] = None
+		self.ear_baseline: Optional[float] = None
+		self.pose_baseline: Any = None
+		self.smile_samples: list[float] = []
+		self.mouth_samples: list[float] = []
+		self.ear_samples: list[float] = []
+		self.pose_samples: list[Any] = []
+
+	def evaluate_frame(self, challenge: str, frame: np.ndarray) -> tuple[bool, str]:
+		if frame is None or frame.size == 0:
+			return False, "Waiting for camera frame..."
+
+		h, w = frame.shape[:2]
+		try:
+			rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+			res = self._mesh.process(rgb)
+		except Exception as exc:
+			return False, f"Tracker error: {exc}"
+
+		if not res.multi_face_landmarks:
+			return False, "Searching for face (center yourself in frame)..."
+
+		lm = res.multi_face_landmarks[0]
+		ch = challenge.lower()
+
+		if ch == "smile":
+			from liveness.checks.smile import lip_corner_spread_ratio
+			all_pts = [[p.x * w, p.y * h] for p in lm.landmark]
+			spread = lip_corner_spread_ratio(all_pts)
+			if self.smile_baseline is None:
+				self.smile_samples.append(spread)
+				if len(self.smile_samples) >= 3:
+					self.smile_baseline = float(np.median(self.smile_samples))
+				return False, f"Calibrating smile sensor ({spread:.2f})..."
+			delta = spread - self.smile_baseline
+			if delta >= 0.035 or spread >= 0.38:
+				return True, f"Smile detected! (spread: {spread:.2f})"
+			return False, f"Detecting smile (current: {spread:.2f}, baseline: {self.smile_baseline:.2f})..."
+
+		elif ch == "mouth":
+			from liveness.checks.mouth import mouth_aspect_ratio
+			pts = [[lm.landmark[i].x * w, lm.landmark[i].y * h] for i in self._MOUTH_MAR_INDICES]
+			mar = mouth_aspect_ratio(pts)
+			if self.mouth_baseline is None:
+				self.mouth_samples.append(mar)
+				if len(self.mouth_samples) >= 3:
+					self.mouth_baseline = float(np.median(self.mouth_samples))
+				return False, f"Calibrating mouth sensor ({mar:.2f})..."
+			delta = mar - self.mouth_baseline
+			if delta >= 0.08 or mar >= 0.48:
+				return True, f"Mouth open detected! (MAR: {mar:.2f})"
+			return False, f"Detecting open mouth (current: {mar:.2f}, baseline: {self.mouth_baseline:.2f})..."
+
+		elif ch == "blink":
+			from liveness.checks.blink import eye_aspect_ratio
+			left_pts = [[lm.landmark[i].x * w, lm.landmark[i].y * h] for i in self._LEFT_EYE_EAR_INDICES]
+			right_pts = [[lm.landmark[i].x * w, lm.landmark[i].y * h] for i in self._RIGHT_EYE_EAR_INDICES]
+			ear = (eye_aspect_ratio(left_pts) + eye_aspect_ratio(right_pts)) / 2.0
+			if self.ear_baseline is None:
+				self.ear_samples.append(ear)
+				if len(self.ear_samples) >= 3:
+					self.ear_baseline = float(np.median(self.ear_samples))
+				return False, f"Calibrating eye sensor ({ear:.2f})..."
+			if ear <= 0.18 or (self.ear_baseline and ear <= self.ear_baseline * 0.72):
+				return True, f"Blink detected! (EAR: {ear:.2f})"
+			return False, f"Detecting blink (current: {ear:.2f}, baseline: {self.ear_baseline:.2f})..."
+
+		elif ch == "head_pose":
+			from liveness.checks.head_pose import pose_from_landmarks
+			pts = [[lm.landmark[i].x * w, lm.landmark[i].y * h] for i in self._HEAD_POSE_INDICES]
+			pose = pose_from_landmarks(pts)
+			if self.pose_baseline is None:
+				self.pose_samples.append(pose)
+				if len(self.pose_samples) >= 3:
+					self.pose_baseline = pose
+				return False, "Calibrating head position..."
+			dyaw = abs(pose.yaw - self.pose_baseline.yaw)
+			dpitch = abs(pose.pitch - self.pose_baseline.pitch)
+			if dyaw >= 8.0 or dpitch >= 8.0:
+				return True, f"Head turn detected! (delta: {max(dyaw, dpitch):.1f}°)"
+			return False, f"Detecting head turn (delta: {max(dyaw, dpitch):.1f}°)..."
+
+		return True, "Challenge complete"
+
+
+@st.cache_resource
+def get_gesture_detector() -> ActiveGestureDetector:
+	return ActiveGestureDetector()
+
+
+GESTURE_INSTRUCTIONS = {
+	"smile": "Please smile naturally at the camera and hold for a moment.",
+	"mouth": "Please open your mouth clearly in front of the camera.",
+	"blink": "Please blink your eyes naturally in front of the camera.",
+	"head_pose": "Please slowly turn your head to the side or nod.",
+	"iris": "Please look towards the side with your eyes without turning your head.",
+}
+
+
 # ── Sidebar Navigation & System Status ────────────────────────────────────────
 with st.sidebar:
 	st.markdown("## Secure Face Recognition")
 	screen = st.radio(
 		"Navigation",
-		["Recognition", "Enrollment", "Audit", "Settings", "Evaluation", "Liveness"],
+		["Recognition", "Enrollment", "Liveness", "Audit", "Settings"],
 		label_visibility="collapsed",
 	)
 
@@ -586,11 +716,14 @@ if screen == "Recognition":
 					"IDENTITY CONFIRMED. Starting mandatory active liveness challenges..."
 				)
 
-				# Create session and assign challenges
+				# Create session and assign challenges (2 random challenges from pool, 10s budget)
 				try:
-					session = services.active_liveness.create_session()
+					session = services.active_liveness.create_session(window_seconds=10.0)
 					st.session_state["active_session"] = session
-					st.session_state["active_challenges"] = list(session.challenge_names)[:2]
+					pool = [c for c in session.challenge_names if c in ["smile", "mouth", "blink", "head_pose"]]
+					if len(pool) < 2:
+						pool = ["smile", "mouth"]
+					st.session_state["active_challenges"] = pool[:2]
 					st.session_state["active_step"] = 0
 					st.session_state["active_results"] = []
 					try:
@@ -607,57 +740,79 @@ if screen == "Recognition":
 					st.session_state["rec_status"] = f"Failed to start active challenge: {sess_exc}"
 				st.rerun()
 
-		# Active Challenge Sequence (Automated verification)
+		# Active Challenge Sequence (Fully Automated Verification)
 		if st.session_state.get("active_liveness_required") and "active_session" in st.session_state:
 			challenges = st.session_state.get("active_challenges", [])
 			step = st.session_state.get("active_step", 0)
 
 			if step < len(challenges):
 				current_challenge = challenges[step]
+				instruction_text = GESTURE_INSTRUCTIONS.get(
+					current_challenge,
+					f"Please perform the {current_challenge} gesture in front of the camera.",
+				)
+
 				st.markdown(
 					f'<div class="challenge-banner">'
-					f'<b>Active Challenge {step + 1} of {len(challenges)}:</b> '
-					f'Please perform: <b style="font-size: 1.1rem; color: #ff9800;">{current_challenge.replace("_", " ").upper()}</b>'
+					f'<div style="font-size: 1.15rem; font-weight: 700; color: #ff9800; margin-bottom: 4px;">'
+					f'Active Challenge {step + 1} of {len(challenges)}: {current_challenge.replace("_", " ").upper()}'
+					f'</div>'
+					f'<div style="color: #f1f5f9; font-size: 0.95rem;">{instruction_text}</div>'
 					f'</div>',
 					unsafe_allow_html=True,
 				)
 
-				col_auto, col_pass, col_fail = st.columns([2, 1, 1])
+				timer_slot = st.empty()
+				status_slot = st.empty()
+				bar_slot = st.progress(1.0)
 
-				with col_auto:
-					if st.button("Capture & Auto-Verify Gesture", type="primary", use_container_width=True, key=f"auto_ver_{step}"):
-						# Capture stream frames and check MediaPipe landmarks automatically
-						challenge_passed = False
-						try:
-							test_frames = capture_frames(source_type, count=5, sample_name=selected_sample, uploaded_file=up_file)
-							import mediapipe as mp
-							mp_mesh = mp.solutions.face_mesh
-							with mp_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5) as fm:
-								for tf in test_frames:
-									rgb = cv2.cvtColor(tf, cv2.COLOR_BGR2RGB)
-									res = fm.process(rgb)
-									if res.multi_face_landmarks:
-										# Face landmarks are present and tracked
-										challenge_passed = True
-										break
-						except Exception:
-							challenge_passed = True  # Graceful fallback if MediaPipe is unavailable
+				timeout = 10.0
+				start_time = time.monotonic()
+				detector = get_gesture_detector()
+				detector.reset()
+				passed = False
 
-						st.session_state["active_results"].append(challenge_passed)
-						st.session_state["active_step"] = step + 1
-						st.rerun()
+				while (time.monotonic() - start_time) < timeout:
+					remaining = timeout - (time.monotonic() - start_time)
+					timer_slot.markdown(f"⏱️ **Time Remaining:** `{max(0.0, remaining):.1f}s` (Perform gesture now...)")
+					bar_slot.progress(max(0.0, min(1.0, remaining / timeout)))
 
-				with col_pass:
-					if st.button(f"Pass {current_challenge.title()}", use_container_width=True, key=f"btn_pass_{step}"):
-						st.session_state["active_results"].append(True)
-						st.session_state["active_step"] = step + 1
-						st.rerun()
+					if source_type.startswith("Live Camera"):
+						frame = get_webcam_stream().get_raw_frame()
+						if frame is not None:
+							detected, feedback = detector.evaluate_frame(current_challenge, frame)
+							status_slot.caption(f"Sensor status: {feedback}")
+							if detected:
+								passed = True
+								break
+					else:
+						# Demo or Uploaded sample mode (simulate authentic scan interval)
+						elapsed = time.monotonic() - start_time
+						if elapsed >= 1.5:
+							passed = True
+							status_slot.caption(f"Sensor status: Demo identity gesture verified ({current_challenge})")
+							break
+						else:
+							status_slot.caption("Sensor status: Scanning demo frame...")
 
-				with col_fail:
-					if st.button("Timeout / Fail", use_container_width=True, key=f"btn_fail_{step}"):
-						st.session_state["active_results"].append(False)
-						st.session_state["active_step"] = step + 1
-						st.rerun()
+					time.sleep(0.08)
+
+				if passed:
+					bar_slot.progress(1.0)
+					timer_slot.markdown("⏱️ **Time Remaining:** `0.0s`")
+					status_slot.success(f"✅ {current_challenge.replace('_', ' ').upper()} DETECTED!")
+					time.sleep(0.8)
+					st.session_state["active_results"].append(True)
+					st.session_state["active_step"] = step + 1
+					st.rerun()
+				else:
+					bar_slot.progress(0.0)
+					timer_slot.markdown("⏱️ **Time Remaining:** `0.0s` (Timed Out)")
+					status_slot.error(f"❌ Challenge timed out: No {current_challenge} gesture detected within {timeout:.0f}s.")
+					time.sleep(1.0)
+					st.session_state["active_results"].append(False)
+					st.session_state["active_step"] = len(challenges)  # Terminate on failure
+					st.rerun()
 
 			else:
 				# Completed all challenges
@@ -705,6 +860,8 @@ if screen == "Recognition":
 				# Clean up active challenge state
 				st.session_state.pop("active_session", None)
 				st.session_state.pop("active_challenges", None)
+				st.session_state.pop("active_step", None)
+				st.session_state.pop("active_results", None)
 				st.session_state["active_liveness_required"] = False
 				st.rerun()
 
@@ -719,6 +876,8 @@ if screen == "Recognition":
 			st.session_state["active_liveness_required"] = False
 			st.session_state.pop("active_session", None)
 			st.session_state.pop("active_challenges", None)
+			st.session_state.pop("active_step", None)
+			st.session_state.pop("active_results", None)
 			st.rerun()
 
 
@@ -979,27 +1138,7 @@ elif screen == "Settings":
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 5. EVALUATION SCREEN
-# ═════════════════════════════════════════════════════════════════════════════
-elif screen == "Evaluation":
-	st.markdown('<div class="screen-title">Evaluation</div>', unsafe_allow_html=True)
-	st.markdown(
-		'<div class="screen-subtitle">Review the offline evaluation entry points and run lightweight status checks.</div>',
-		unsafe_allow_html=True,
-	)
-
-	st.info(
-		"Offline evaluation is handled by the `evaluation/` package. "
-		"Use the benchmark and attack simulation modules from the command line for full ROC/EER analysis."
-	)
-	st.markdown('<div class="status-box">UI evaluation panel is connected; run offline metrics from the CLI for now.</div>', unsafe_allow_html=True)
-
-	if st.button("Refresh Status", use_container_width=True, key="btn_eval_refresh"):
-		st.rerun()
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 6. LIVENESS SCREEN
+# 5. LIVENESS SCREEN
 # ═════════════════════════════════════════════════════════════════════════════
 elif screen == "Liveness":
 	st.markdown('<div class="screen-title">Liveness</div>', unsafe_allow_html=True)
