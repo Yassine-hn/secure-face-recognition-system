@@ -165,7 +165,7 @@ class SilentFaceWrapper:
         # Predict
         with torch.no_grad():
             result = self.model.forward(img_tensor)
-            result = F.softmax(result).cpu().numpy()
+            result = F.softmax(result, dim=-1).cpu().numpy()
         
         return result[0]  # Return [spoof_prob, real_prob]
 

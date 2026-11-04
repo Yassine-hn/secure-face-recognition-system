@@ -55,6 +55,16 @@ def build_default_services(base_dir: str | Path | None = None) -> AppServices:
 
 	detector = FaceDetector()
 	embedder = FaceEmbedder()
+	# Share lazy InsightFace instance so models are only initialized once
+	original_detector_load = detector._load_model
+
+	def _shared_load():
+		m = original_detector_load()
+		embedder._model = m
+		return m
+
+	detector._load_model = _shared_load
+	embedder._load_model = _shared_load
 	matcher = FaceMatcher(threshold=0.5)
 	# Use the same transformer for both enrollment and recognition
 	# This ensures query embeddings are transformed the same way as stored templates

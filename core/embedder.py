@@ -71,7 +71,11 @@ class FaceEmbedder:
 		try:
 			from insightface.app import FaceAnalysis
 
-			app = FaceAnalysis(name=self.model_name, providers=self.providers)
+			app = FaceAnalysis(
+				name=self.model_name,
+				allowed_modules=["detection", "recognition"],
+				providers=self.providers or ["CPUExecutionProvider"],
+			)
 			app.prepare(ctx_id=self.ctx_id, det_size=self.det_size)
 			self._model = app
 			return app
@@ -129,15 +133,25 @@ class FaceEmbedder:
 
 	@staticmethod
 	def _extract_from_model(model: Any, face_image: np.ndarray) -> np.ndarray:
+		if hasattr(model, "models") and "recognition" in getattr(model, "models", {}):
+			rec_model = model.models["recognition"]
+			try:
+				import cv2
+				mat = face_image
+				if mat.ndim == 2:
+					mat = cv2.cvtColor(mat, cv2.COLOR_GRAY2BGR)
+				resized = cv2.resize(mat, (112, 112))
+				feat = rec_model.get_feat(resized)
+				return np.asarray(feat, dtype=np.float32).flatten()
+			except Exception:
+				pass
+
 		if hasattr(model, "get"):
 			faces = model.get(face_image)
-			if not faces:
-				raise EmbeddingError("No face embedding returned by the model")
-			face = faces[0]
-			embedding = getattr(face, "embedding", None)
-			if embedding is None:
-				raise EmbeddingError("Model returned a face without an embedding")
-			return np.asarray(embedding, dtype=np.float32)
+			if faces:
+				embedding = getattr(faces[0], "embedding", None)
+				if embedding is not None:
+					return np.asarray(embedding, dtype=np.float32)
 
 		if callable(model):
 			embedding = model(face_image)
