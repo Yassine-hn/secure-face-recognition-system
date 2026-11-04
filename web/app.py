@@ -275,6 +275,10 @@ class WebcamManager:
 		with self._lock:
 			return self._error
 
+	def is_available(self) -> bool:
+		with self._lock:
+			return self._running and self._cap is not None and self._cap.isOpened() and self._error is None
+
 
 @st.cache_resource
 def get_webcam_stream() -> WebcamManager:
@@ -283,11 +287,21 @@ def get_webcam_stream() -> WebcamManager:
 	return manager
 
 
+def get_camera_source_options() -> tuple[list[str], int]:
+	"""Return available frame sources and the smart default index based on hardware availability."""
+	cam = get_webcam_stream()
+	if cam.is_available():
+		return ["Live Camera (Webcam)", "Sample Identity (Demo)", "Browser Camera (Webcam)", "Upload Image"], 0
+	else:
+		return ["Sample Identity (Demo)", "Browser Camera (Webcam)", "Upload Image", "Live Camera (Local Device)"], 0
+
+
 def capture_frames(
 	source_type: str,
 	count: int = 3,
 	sample_name: Optional[str] = None,
 	uploaded_file: Any = None,
+	camera_file: Any = None,
 ) -> list[np.ndarray]:
 	"""Automatically capture a burst of frames from the selected video or image source.
 
@@ -298,6 +312,16 @@ def capture_frames(
 	if source_type.startswith("Live Camera"):
 		manager = get_webcam_stream()
 		return manager.capture_burst(count=count)
+
+	elif source_type.startswith("Browser Camera"):
+		if camera_file is None:
+			raise ValueError("Please capture a photo first using the 'Take Photo' camera widget.")
+		bgr = frame_to_bgr(camera_file)
+		if bgr is None or bgr.size == 0:
+			raise ValueError("Could not decode the photo from your browser camera.")
+		for _ in range(max(1, count)):
+			frames.append(bgr.copy())
+		return frames
 
 	elif source_type.startswith("Sample Identity"):
 		sample_dir = PROJECT_ROOT / "web" / "sample_faces"
@@ -341,12 +365,19 @@ def get_preview_frame(
 	source_type: str,
 	sample_name: Optional[str] = None,
 	uploaded_file: Any = None,
+	camera_file: Any = None,
 ) -> Optional[np.ndarray]:
 	"""Get a single representative frame for the preview widget."""
 	try:
 		if source_type.startswith("Live Camera"):
 			return get_webcam_stream().get_annotated_frame()
-		frames = capture_frames(source_type, count=1, sample_name=sample_name, uploaded_file=uploaded_file)
+		frames = capture_frames(
+			source_type,
+			count=1,
+			sample_name=sample_name,
+			uploaded_file=uploaded_file,
+			camera_file=camera_file,
+		)
 		return frames[0] if frames else None
 	except Exception:
 		return None
@@ -366,8 +397,12 @@ def render_live_camera_feed(key_prefix: str = "rec") -> None:
 	else:
 		err = stream.error
 		if err:
-			st.error(f"Live Camera Unavailable: {err}")
-			st.info("Tip: Switch camera source to 'Sample Identity (Demo)' to test without a physical camera.")
+			st.warning(
+				"ℹ️ **Cloud Environment Notice**\n\n"
+				"This application is hosted on Streamlit Cloud (remote cloud container) without a physical USB webcam attached.\n\n"
+				"• **To test immediately in the cloud**: Switch the 'Camera Source' above to **Sample Identity (Demo)** or **Browser Camera (Webcam)**.\n"
+				"• **To run real-time OpenCV live streaming**: Run locally on your laptop with `python main.py --web`."
+			)
 		else:
 			st.info("Starting live camera feed...")
 
@@ -385,10 +420,11 @@ def render_static_preview(
 	source_type: str,
 	sample_name: Optional[str] = None,
 	uploaded_file: Any = None,
+	camera_file: Any = None,
 	key_prefix: str = "preview",
 ) -> None:
 	"""Render a static preview frame for sample identity or uploaded image."""
-	preview_frame = get_preview_frame(source_type, sample_name, uploaded_file)
+	preview_frame = get_preview_frame(source_type, sample_name, uploaded_file, camera_file)
 	if preview_frame is not None:
 		annotated = draw_face_overlay(preview_frame)
 		st.image(
@@ -562,21 +598,26 @@ if screen == "Recognition":
 	col_left, col_right = st.columns([1, 1], gap="large")
 
 	with col_left:
+		options, def_idx = get_camera_source_options()
 		source_type = st.radio(
 			"Camera Source:",
-			["Live Camera (Webcam)", "Sample Identity (Demo)", "Upload Image"],
+			options,
+			index=def_idx,
 			horizontal=True,
 			key="rec_source_radio",
 		)
 
 		selected_sample: Optional[str] = None
 		up_file: Any = None
+		cam_file: Any = None
 
 		if source_type.startswith("Sample Identity"):
 			sample_dir = PROJECT_ROOT / "web" / "sample_faces"
 			sample_files = list(sample_dir.glob("*.jpg")) if sample_dir.exists() else []
 			sample_options = ["None"] + [p.name for p in sample_files]
 			selected_sample = st.selectbox("Select Sample Photo:", sample_options, key="rec_sample_select")
+		elif source_type.startswith("Browser Camera"):
+			cam_file = st.camera_input("Browser Webcam Snapshot", key="rec_cam_input")
 		elif source_type.startswith("Upload Image"):
 			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="rec_file_upload")
 
@@ -584,7 +625,7 @@ if screen == "Recognition":
 		if source_type.startswith("Live Camera"):
 			render_live_camera_feed("rec")
 		else:
-			render_static_preview(source_type, selected_sample, up_file, key_prefix="rec")
+			render_static_preview(source_type, selected_sample, up_file, cam_file, key_prefix="rec")
 
 	with col_right:
 		st.markdown("#### Status")
@@ -600,7 +641,13 @@ if screen == "Recognition":
 		if st.button("Run Recognition", type="primary", use_container_width=True, key="btn_run_rec"):
 			# Step 1: Automated frame capture
 			try:
-				frames = capture_frames(source_type, count=3, sample_name=selected_sample, uploaded_file=up_file)
+				frames = capture_frames(
+					source_type,
+					count=3,
+					sample_name=selected_sample,
+					uploaded_file=up_file,
+					camera_file=cam_file,
+				)
 			except Exception as exc:
 				st.session_state["rec_status"] = f"Frame capture failed: {exc}"
 				st.session_state["rec_result"] = (
@@ -903,21 +950,26 @@ elif screen == "Enrollment":
 	col_left, col_right = st.columns([1, 1], gap="large")
 
 	with col_left:
+		options, def_idx = get_camera_source_options()
 		source_type = st.radio(
 			"Camera Source:",
-			["Live Camera (Webcam)", "Sample Identity (Demo)", "Upload Image"],
+			options,
+			index=def_idx,
 			horizontal=True,
 			key="enr_source_radio",
 		)
 
 		selected_sample: Optional[str] = None
 		up_file: Any = None
+		cam_file: Any = None
 
 		if source_type.startswith("Sample Identity"):
 			sample_dir = PROJECT_ROOT / "web" / "sample_faces"
 			sample_files = list(sample_dir.glob("*.jpg")) if sample_dir.exists() else []
 			sample_options = ["None"] + [p.name for p in sample_files]
 			selected_sample = st.selectbox("Select Sample Photo:", sample_options, key="enr_sample_select")
+		elif source_type.startswith("Browser Camera"):
+			cam_file = st.camera_input("Browser Webcam Snapshot", key="enr_cam_input")
 		elif source_type.startswith("Upload Image"):
 			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="enr_file_upload")
 
@@ -925,7 +977,7 @@ elif screen == "Enrollment":
 		if source_type.startswith("Live Camera"):
 			render_live_camera_feed("enr")
 		else:
-			render_static_preview(source_type, selected_sample, up_file, key_prefix="enr")
+			render_static_preview(source_type, selected_sample, up_file, cam_file, key_prefix="enr")
 
 	with col_right:
 		st.markdown("#### Student ID")
@@ -947,7 +999,13 @@ elif screen == "Enrollment":
 
 			try:
 				# 1. Automatic burst frame capture
-				frames = capture_frames(source_type, count=sample_count, sample_name=selected_sample, uploaded_file=up_file)
+				frames = capture_frames(
+					source_type,
+					count=sample_count,
+					sample_name=selected_sample,
+					uploaded_file=up_file,
+					camera_file=cam_file,
+				)
 
 				embeddings = []
 				for idx, frame in enumerate(frames):
@@ -1159,21 +1217,26 @@ elif screen == "Liveness":
 	col_left, col_right = st.columns([1, 1], gap="large")
 
 	with col_left:
+		options, def_idx = get_camera_source_options()
 		source_type = st.radio(
 			"Camera Source:",
-			["Live Camera (Webcam)", "Sample Identity (Demo)", "Upload Image"],
+			options,
+			index=def_idx,
 			horizontal=True,
 			key="liv_source_radio",
 		)
 
 		selected_sample: Optional[str] = None
 		up_file: Any = None
+		cam_file: Any = None
 
 		if source_type.startswith("Sample Identity"):
 			sample_dir = PROJECT_ROOT / "web" / "sample_faces"
 			sample_files = list(sample_dir.glob("*.jpg")) if sample_dir.exists() else []
 			sample_options = ["None"] + [p.name for p in sample_files]
 			selected_sample = st.selectbox("Select Sample Photo:", sample_options, key="liv_sample_select")
+		elif source_type.startswith("Browser Camera"):
+			cam_file = st.camera_input("Browser Webcam Snapshot", key="liv_cam_input")
 		elif source_type.startswith("Upload Image"):
 			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="liv_file_upload")
 
@@ -1181,7 +1244,7 @@ elif screen == "Liveness":
 		if source_type.startswith("Live Camera"):
 			render_live_camera_feed("liv")
 		else:
-			render_static_preview(source_type, selected_sample, up_file, key_prefix="liv")
+			render_static_preview(source_type, selected_sample, up_file, cam_file, key_prefix="liv")
 
 	with col_right:
 		st.markdown("#### Passive Liveness")
@@ -1190,7 +1253,13 @@ elif screen == "Liveness":
 
 		if st.button("Check Current Frame", type="primary", use_container_width=True, key="btn_check_frame"):
 			try:
-				frames = capture_frames(source_type, count=1, sample_name=selected_sample, uploaded_file=up_file)
+				frames = capture_frames(
+					source_type,
+					count=1,
+					sample_name=selected_sample,
+					uploaded_file=up_file,
+					camera_file=cam_file,
+				)
 				if not frames:
 					st.session_state["liv_passive_status"] = "Error: No frame available to classify."
 				else:
