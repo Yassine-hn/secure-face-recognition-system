@@ -23,6 +23,6 @@ When you run the evaluation scripts locally, record the following:
 
 ## Notes
 
-- The evaluation screen in [ui/eval_screen.py](../ui/eval_screen.py) intentionally stays lightweight and points users to the offline evaluation package.
+- Offline benchmark and evaluation metrics are executed via the CLI using the `evaluation/` package.
 - Final numerical results should be updated only after you run the benchmark against your local data.
 

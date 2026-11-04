@@ -104,7 +104,7 @@ secure-face-recognition-system/
 ├── README.md                      # Project documentation & portfolio showcase
 │
 ├── web/                           # 🌐 Interactive Web Application
-│   ├── app.py                     # Streamlit web dashboard (Webcam, Enrollment, Liveness, Audit, ROC)
+│   ├── app.py                     # Streamlit web dashboard (Webcam, Enrollment, Liveness, Audit, Settings)
 │   └── sample_faces/              # Synthetic test images for 1-click cloud demo testing
 │
 ├── core/                          # 🧠 Biometric Engine
@@ -205,7 +205,7 @@ pip install -r requirements.txt
 
 ### 1. Web Interface (Browser)
 
-The modern interactive web dashboard runs in any web browser and supports webcam authentication, student enrollment, liveness testing, audit log exploration, and interactive ROC analytics:
+The modern interactive web dashboard runs in any web browser and supports webcam authentication, student enrollment, real-time liveness testing, audit log exploration, and system configuration:
 
 ```bash
 python main.py --web
