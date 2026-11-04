@@ -7,9 +7,11 @@ dynamic active liveness challenge sequences, and robust fallback error handling.
 
 from __future__ import annotations
 
+import atexit
 import csv
 import io
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -131,6 +133,139 @@ def draw_face_overlay(frame: np.ndarray) -> np.ndarray:
 	return annotated
 
 
+# ── Threaded Mirrored Webcam Stream Manager ──────────────────────────────────
+class WebcamManager:
+	"""Persistent, threaded camera reader providing a mirrored, real-time video feed.
+
+	Keeps the cv2.VideoCapture device open to eliminate 300ms latency spikes and avoid
+	device-busy locks. Applies a horizontal flip (cv2.flip(frame, 1)) so that user
+	head movement mirrors physical reality (e.g. turning right looks right).
+	"""
+
+	def __init__(self, device_index: int = 0) -> None:
+		self.device_index = device_index
+		self._cap: Optional[cv2.VideoCapture] = None
+		self._thread: Optional[threading.Thread] = None
+		self._running = False
+		self._lock = threading.RLock()
+		self._last_raw: Optional[np.ndarray] = None
+		self._last_annotated: Optional[np.ndarray] = None
+		self._last_frame_time: float = 0.0
+		self._error: Optional[str] = None
+		self.start()
+
+	def start(self) -> None:
+		with self._lock:
+			if self._running:
+				return
+			try:
+				self._cap = cv2.VideoCapture(self.device_index)
+				if not self._cap.isOpened():
+					self._error = f"Camera device {self.device_index} could not be opened (not found or locked by another app)."
+					try:
+						self._cap.release()
+					except Exception:
+						pass
+					self._cap = None
+					return
+				self._running = True
+				self._error = None
+				self._thread = threading.Thread(target=self._worker_loop, daemon=True)
+				self._thread.start()
+			except Exception as exc:
+				self._error = str(exc)
+
+	def _worker_loop(self) -> None:
+		while self._running:
+			if self._cap is None or not self._cap.isOpened():
+				break
+			try:
+				ret, frame = self._cap.read()
+				if ret and frame is not None and frame.size > 0:
+					# Mirror horizontally so turning right feels natural
+					mirrored = cv2.flip(frame, 1)
+					annotated = draw_face_overlay(mirrored)
+					with self._lock:
+						self._last_raw = mirrored
+						self._last_annotated = annotated
+						self._last_frame_time = time.time()
+						self._error = None
+				else:
+					time.sleep(0.02)
+			except Exception as exc:
+				with self._lock:
+					self._error = str(exc)
+			time.sleep(0.03)  # ~30 FPS
+
+	def get_annotated_frame(self) -> Optional[np.ndarray]:
+		with self._lock:
+			if not self._running or self._cap is None:
+				self.start()
+			if self._last_annotated is not None:
+				return self._last_annotated.copy()
+			return None
+
+	def get_raw_frame(self) -> Optional[np.ndarray]:
+		with self._lock:
+			if not self._running or self._cap is None:
+				self.start()
+			if self._last_raw is not None:
+				return self._last_raw.copy()
+			return None
+
+	def capture_burst(self, count: int = 3, interval: float = 0.06) -> list[np.ndarray]:
+		with self._lock:
+			if not self._running or self._cap is None:
+				self.start()
+			if self._error:
+				raise RuntimeError(f"Live camera error: {self._error}")
+
+		frames: list[np.ndarray] = []
+		for _ in range(max(1, count)):
+			raw = self.get_raw_frame()
+			if raw is not None:
+				frames.append(raw)
+			time.sleep(interval)
+
+		if not frames:
+			with self._lock:
+				if self._cap is not None and self._cap.isOpened():
+					ret, f = self._cap.read()
+					if ret and f is not None and f.size > 0:
+						frames.append(cv2.flip(f, 1))
+
+		if not frames:
+			raise RuntimeError("Live camera device returned no readable frames. Please check camera connections.")
+		return frames
+
+	def restart(self) -> None:
+		self.stop()
+		self.start()
+
+	def stop(self) -> None:
+		with self._lock:
+			self._running = False
+			if self._cap is not None:
+				try:
+					self._cap.release()
+				except Exception:
+					pass
+				self._cap = None
+			self._thread = None
+
+	@property
+	def error(self) -> Optional[str]:
+		with self._lock:
+			return self._error
+
+
+@st.cache_resource
+def get_webcam_stream() -> WebcamManager:
+	manager = WebcamManager()
+	atexit.register(manager.stop)
+	return manager
+
+
 def capture_frames(
 	source_type: str,
 	count: int = 3,
@@ -144,27 +279,8 @@ def capture_frames(
 	frames: list[np.ndarray] = []
 
 	if source_type.startswith("Live Camera"):
-		cap = cv2.VideoCapture(0)
-		if not cap.isOpened():
-			raise RuntimeError(
-				"Could not open live camera (device index 0 is not available or is locked by another process). "
-				"Please verify camera permissions or switch to 'Sample Identity (Demo)'."
-			)
-		try:
-			# Flush initial hardware frame buffer
-			for _ in range(2):
-				cap.read()
-			for _ in range(max(1, count)):
-				ret, frame = cap.read()
-				if ret and frame is not None and frame.size > 0:
-					frames.append(frame.copy())
-				time.sleep(0.06)
-		finally:
-			cap.release()
-
-		if not frames:
-			raise RuntimeError("Camera device was opened, but failed to return any readable image frames.")
-		return frames
+		manager = get_webcam_stream()
+		return manager.capture_burst(count=count)
 
 	elif source_type.startswith("Sample Identity"):
 		sample_dir = PROJECT_ROOT / "web" / "sample_faces"
@@ -209,12 +325,65 @@ def get_preview_frame(
 	sample_name: Optional[str] = None,
 	uploaded_file: Any = None,
 ) -> Optional[np.ndarray]:
-	"""Get a single representative frame for the live preview widget."""
+	"""Get a single representative frame for the preview widget."""
 	try:
+		if source_type.startswith("Live Camera"):
+			return get_webcam_stream().get_annotated_frame()
 		frames = capture_frames(source_type, count=1, sample_name=sample_name, uploaded_file=uploaded_file)
 		return frames[0] if frames else None
 	except Exception:
 		return None
+
+
+@st.fragment(run_every="350ms")
+def render_live_camera_feed(key_prefix: str = "rec") -> None:
+	"""Render a continuous, real-time live webcam preview with mirror effect and face bounding box."""
+	stream = get_webcam_stream()
+	frame = stream.get_annotated_frame()
+	if frame is not None:
+		st.image(
+			cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+			caption="🟢 Live Camera Feed (Mirrored • Real-Time Face Detection)",
+			width="stretch",
+		)
+	else:
+		err = stream.error
+		if err:
+			st.error(f"Live Camera Unavailable: {err}")
+			st.info("Tip: Switch camera source to 'Sample Identity (Demo)' to test without a physical camera.")
+		else:
+			st.info("Starting live camera feed...")
+
+	col_btn1, col_btn2 = st.columns([1, 1])
+	with col_btn1:
+		if st.button("Restart Camera", use_container_width=True, key=f"{key_prefix}_restart_stream"):
+			stream.restart()
+			st.rerun()
+	with col_btn2:
+		if st.button("Refresh View", use_container_width=True, key=f"{key_prefix}_refresh_view"):
+			st.rerun()
+
+
+def render_static_preview(
+	source_type: str,
+	sample_name: Optional[str] = None,
+	uploaded_file: Any = None,
+	key_prefix: str = "preview",
+) -> None:
+	"""Render a static preview frame for sample identity or uploaded image."""
+	preview_frame = get_preview_frame(source_type, sample_name, uploaded_file)
+	if preview_frame is not None:
+		annotated = draw_face_overlay(preview_frame)
+		st.image(
+			cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
+			caption="Sample Inspection Frame (Face Overlay Active)",
+			width="stretch",
+		)
+	else:
+		st.info("Preview standby. Select a sample photo or upload an image to inspect.")
+
+	if st.button("Refresh Preview", use_container_width=True, key=f"{key_prefix}_refresh_preview"):
+		st.rerun()
 
 
 # ── Sidebar Navigation & System Status ────────────────────────────────────────
@@ -273,19 +442,10 @@ if screen == "Recognition":
 			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="rec_file_upload")
 
 		# Preview display
-		preview_frame = get_preview_frame(source_type, selected_sample, up_file)
-		if preview_frame is not None:
-			annotated = draw_face_overlay(preview_frame)
-			st.image(
-				cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-				caption="Live Camera Preview (Face Overlay Active)",
-				use_container_width=True,
-			)
+		if source_type.startswith("Live Camera"):
+			render_live_camera_feed("rec")
 		else:
-			st.info("Preview standby. Click 'Refresh Preview' or select a photo to verify camera feed.")
-
-		if st.button("Refresh Preview", use_container_width=True, key="rec_refresh_preview"):
-			st.rerun()
+			render_static_preview(source_type, selected_sample, up_file, key_prefix="rec")
 
 	with col_right:
 		st.markdown("#### Status")
@@ -549,6 +709,10 @@ if screen == "Recognition":
 				st.rerun()
 
 		if st.button("Refresh Frame Source", use_container_width=True, key="btn_ref_source"):
+			try:
+				get_webcam_stream().restart()
+			except Exception:
+				pass
 			st.session_state["rec_status"] = "Frame source refreshed."
 			st.session_state["rec_result"] = "No recognition performed yet."
 			st.session_state["rec_timer"] = "Time remaining: --"
@@ -590,19 +754,10 @@ elif screen == "Enrollment":
 			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="enr_file_upload")
 
 		# Preview display
-		preview_frame = get_preview_frame(source_type, selected_sample, up_file)
-		if preview_frame is not None:
-			annotated = draw_face_overlay(preview_frame)
-			st.image(
-				cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-				caption="Enrollment Preview (Face Overlay Active)",
-				use_container_width=True,
-			)
+		if source_type.startswith("Live Camera"):
+			render_live_camera_feed("enr")
 		else:
-			st.info("Preview standby. Click 'Refresh Preview' or select a photo to verify camera feed.")
-
-		if st.button("Refresh Preview", use_container_width=True, key="enr_refresh_preview"):
-			st.rerun()
+			render_static_preview(source_type, selected_sample, up_file, key_prefix="enr")
 
 	with col_right:
 		st.markdown("#### Student ID")
@@ -874,19 +1029,11 @@ elif screen == "Liveness":
 		elif source_type.startswith("Upload Image"):
 			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="liv_file_upload")
 
-		preview_frame = get_preview_frame(source_type, selected_sample, up_file)
-		if preview_frame is not None:
-			annotated = draw_face_overlay(preview_frame)
-			st.image(
-				cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-				caption="Liveness Inspection Frame",
-				use_container_width=True,
-			)
+		# Preview display
+		if source_type.startswith("Live Camera"):
+			render_live_camera_feed("liv")
 		else:
-			st.info("Preview standby. Click 'Refresh Preview' or select a photo to inspect.")
-
-		if st.button("Refresh Preview", use_container_width=True, key="liv_refresh_preview"):
-			st.rerun()
+			render_static_preview(source_type, selected_sample, up_file, key_prefix="liv")
 
 	with col_right:
 		st.markdown("#### Passive Liveness")
