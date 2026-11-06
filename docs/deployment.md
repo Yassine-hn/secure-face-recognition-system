@@ -54,7 +54,11 @@ Hugging Face Spaces provides **16 GB RAM and 2 vCPUs completely free**, which is
 
 ## 2. Deploying to Streamlit Community Cloud
 
-Streamlit Community Cloud is 100% free and connects directly to your public GitHub repository.
+The live interactive production demo is deployed and running at:
+- **Direct Live Cloud URL**: [https://secure-face-recognition-system-6rrhjxeeu8pgd6pp4yipj6.streamlit.app/](https://secure-face-recognition-system-6rrhjxeeu8pgd6pp4yipj6.streamlit.app/)
+- **Canonical App Route**: [https://share.streamlit.io/yassine-hn/secure-face-recognition-system/main/web/app.py](https://share.streamlit.io/yassine-hn/secure-face-recognition-system/main/web/app.py)
+
+Streamlit Community Cloud connects directly to your public GitHub repository.
 
 ### Step-by-Step Instructions:
 
