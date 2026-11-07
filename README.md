@@ -3,7 +3,7 @@
 [![CI Status](https://github.com/Yassine-hn/secure-face-recognition-system/actions/workflows/ci.yml/badge.svg)](https://github.com/Yassine-hn/secure-face-recognition-system/actions)
 [![Python 3.10 | 3.11](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue.svg)](https://www.python.org/)
 [![Live Web Demo](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://secure-face-recognition-system-6rrhjxeeu8pgd6pp4yipj6.streamlit.app/)
-[![UI: IBM Carbon](https://img.shields.io/badge/UI-IBM%20Carbon%20v11-0f62fe.svg)](https://carbondesignsystem.com/)
+[![UI: Enterprise Dark Theme](https://img.shields.io/badge/UI-Enterprise%20Dark%20Theme-0f62fe.svg)](#)
 [![Docker Ready](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](docs/deployment.md)
 [![Security: Cancelable Biometrics](https://img.shields.io/badge/Security-Cancelable_Biometrics-green.svg)](#1-cancelable-biometric-templates)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
@@ -20,7 +20,7 @@ Experience the full enterprise biometric pipeline directly in your web browser w
 👉 **[https://secure-face-recognition-system-6rrhjxeeu8pgd6pp4yipj6.streamlit.app/](https://secure-face-recognition-system-6rrhjxeeu8pgd6pp4yipj6.streamlit.app/)**  
 *(Permanent shortcut: [share.streamlit.io/.../app.py](https://share.streamlit.io/yassine-hn/secure-face-recognition-system/main/web/app.py))*
 
-- **Design System**: Fully styled using the **IBM Carbon Design System (Carbon Gray 100 Dark Theme)** with IBM Plex typography, flat architectural tiles, and accessible status tags.
+- **Enterprise UI Design**: Built with a sleek high-contrast dark theme, flat architectural cards, real-time status badges, and accessible typography.
 - **Sensor Inputs**: Supports pre-loaded sample faces, browser webcam snapshots (`st.camera_input`), image uploads, and continuous local OpenCV video streaming.
 - **Dual Interface**: Streamlit Web dashboard for cloud demos & browser testing + native CustomTkinter desktop GUI for dedicated campus kiosks.
 - **Zero-Setup Docker**: Run locally with a single command: `docker compose up --build`.

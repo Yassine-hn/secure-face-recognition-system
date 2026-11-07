@@ -1,7 +1,6 @@
-"""Streamlit web interface for the Secure Face Recognition System.
+"""Streamlit web interface for the Secure Face Recognition System (SFRS).
 
-Redesigned using the IBM Carbon Design System (Carbon Gray 100 Dark Theme).
-Provides clean enterprise typography (IBM Plex Sans / Mono), sharp rectilinear architecture,
+Provides clean enterprise dark theme typography, sharp rectilinear architecture,
 structured metric telemetry, accessible status tags, and seamless cloud/hardware camera support.
 """
 
@@ -29,9 +28,9 @@ import streamlit as st
 from core.services import AppServices, build_default_services
 
 
-# ── Page Configuration & IBM Carbon Theming ──────────────────────────────────
+# ── Page Configuration & Enterprise Theming ───────────────────────────────────
 st.set_page_config(
-	page_title="IBM Carbon • Secure Face Recognition",
+	page_title="Secure Face Recognition System • SFRS",
 	page_icon="🛡️",
 	layout="wide",
 	initial_sidebar_state="expanded",
@@ -477,10 +476,47 @@ except Exception:
 	pass
 
 
+def _seed_sample_identities_if_empty(srv: AppServices) -> None:
+	"""Auto-seed sample identities into an empty database (e.g. fresh cloud instance)."""
+	try:
+		existing = srv.enrollment.database.list_enrollments()
+		if existing:
+			return
+		sample_dir = PROJECT_ROOT / "web" / "sample_faces"
+		alice_file = sample_dir / "alice_sample.jpg"
+		if alice_file.exists():
+			img = cv2.imread(str(alice_file))
+			if img is not None and img.size > 0:
+				try:
+					emb, _ = srv.embedder.extract_embedding_from_frame(img)
+				except Exception:
+					crop = srv.detector.detect_face(img)
+					emb = srv.embedder.extract_embedding(crop)
+				if emb is not None:
+					srv.enrollment.enroll_embedding(
+						student_id="STU-001",
+						embedding=emb,
+						metadata={"name": "Alice (Demo Genuine)", "source": "sample_seed"},
+					)
+					try:
+						srv.audit_logger.append_event(
+							result="GRANTED",
+							student_id="STU-001",
+							activity_type="SYSTEM_INIT",
+							metadata={"note": "Pre-enrolled sample profile STU-001 (Alice)"},
+						)
+					except Exception:
+						pass
+	except Exception as exc:
+		print(f"[SFRS] Demo database auto-seeding notice: {exc}")
+
+
 @st.cache_resource
 def get_services() -> AppServices:
 	"""Initialize and cache the backend application services container."""
-	return build_default_services()
+	srv = build_default_services()
+	_seed_sample_identities_if_empty(srv)
+	return srv
 
 
 try:
@@ -490,15 +526,14 @@ except Exception as init_exc:
 	st.stop()
 
 
-# ── Carbon UI Helper Functions ───────────────────────────────────────────────
-def render_carbon_shell_header() -> None:
-	"""Render the persistent IBM Carbon UI Shell top banner."""
+# ── UI Shell Helper Functions ────────────────────────────────────────────────
+def render_shell_header() -> None:
+	"""Render the persistent top application header bar."""
 	st.markdown(
 		"""
 		<div class="cds--shell-header">
 			<div class="cds--shell-brand">
-				<span class="cds--shell-prefix">IBM</span>
-				<span class="cds--shell-product">Biometric Security Platform &bull; v1.0 Production</span>
+				<span class="cds--shell-product">Secure Face Recognition System &bull; v1.0 Production</span>
 			</div>
 			<div class="cds--shell-status">
 				<span class="cds--tag cds--tag--green">SYSTEM ACTIVE</span>
@@ -510,8 +545,8 @@ def render_carbon_shell_header() -> None:
 	)
 
 
-def render_carbon_page_header(breadcrumb_section: str, title: str, subtitle: str) -> None:
-	"""Render standard Carbon breadcrumb, heading, and subtitle."""
+def render_page_header(breadcrumb_section: str, title: str, subtitle: str) -> None:
+	"""Render standard breadcrumb, heading, and subtitle."""
 	st.markdown(
 		f"""
 		<div class="cds--breadcrumb">
@@ -526,6 +561,11 @@ def render_carbon_page_header(breadcrumb_section: str, title: str, subtitle: str
 		""",
 		unsafe_allow_html=True,
 	)
+
+
+# Aliases for backward compatibility
+render_carbon_shell_header = render_shell_header
+render_carbon_page_header = render_page_header
 
 
 def frame_to_bgr(uploaded_file: Any) -> Optional[np.ndarray]:
@@ -719,6 +759,37 @@ def get_camera_source_options() -> tuple[list[str], int]:
 		return ["Sample Identity (Demo)", "Browser Camera (Webcam)", "Upload Image", "Live Camera (Local Device)"], 0
 
 
+def get_sample_identities() -> dict[str, str]:
+	"""Discover and map available pre-loaded face samples to clean descriptive labels.
+
+	Returns a dictionary mapping human-readable labels to filenames in web/sample_faces.
+	Guarantees standard genuine identities (Alice, Bob) and attack samples (Spoof) are mapped.
+	"""
+	sample_dir = PROJECT_ROOT / "web" / "sample_faces"
+	mapping: dict[str, str] = {}
+	if not sample_dir.exists():
+		sample_dir.mkdir(parents=True, exist_ok=True)
+
+	known = {
+		"alice_sample.jpg": "Alice • Genuine Identity (STU-001)",
+		"bob_sample.jpg": "Bob • Genuine Identity (STU-002)",
+		"spoof_screen_sample.jpg": "Screen Replay Attack • Spoof Sample",
+	}
+
+	for filename, label in known.items():
+		if (sample_dir / filename).exists():
+			mapping[label] = filename
+
+	# Discover any additional sample files added (.jpg, .jpeg, .png)
+	for ext in ("*.jpg", "*.jpeg", "*.png"):
+		for p in sorted(sample_dir.glob(ext)):
+			if p.name not in known and p.name not in mapping.values():
+				clean_name = p.stem.replace("_", " ").title()
+				mapping[f"{clean_name} ({p.name})"] = p.name
+
+	return mapping
+
+
 def capture_frames(
 	source_type: str,
 	count: int = 3,
@@ -741,15 +812,23 @@ def capture_frames(
 			raise ValueError("Please capture a photo first using the 'Take Photo' camera widget.")
 		bgr = frame_to_bgr(camera_file)
 		if bgr is None or bgr.size == 0:
-			raise ValueError("Could not decode the photo from your browser camera.")
+			raise ValueError("Could not decode the snapshot from your browser camera.")
 		for _ in range(max(1, count)):
 			frames.append(bgr.copy())
 		return frames
 
 	elif source_type.startswith("Sample Identity"):
 		sample_dir = PROJECT_ROOT / "web" / "sample_faces"
+		samples = get_sample_identities()
+		# Fallback resolution if sample_name is empty, "None", or a descriptive label
 		if not sample_name or sample_name == "None":
-			raise ValueError("Please select a valid sample identity from the dropdown list.")
+			if samples:
+				sample_name = next(iter(samples.values()))
+			else:
+				raise ValueError("No sample face profiles found in web/sample_faces.")
+		elif sample_name in samples:
+			sample_name = samples[sample_name]
+
 		img_path = sample_dir / sample_name
 		if not img_path.exists():
 			raise FileNotFoundError(f"Sample photo file not found: {sample_name}")
@@ -789,11 +868,12 @@ def get_preview_frame(
 	sample_name: Optional[str] = None,
 	uploaded_file: Any = None,
 	camera_file: Any = None,
-) -> Optional[np.ndarray]:
-	"""Get a single representative frame for the preview widget."""
+) -> tuple[Optional[np.ndarray], Optional[str]]:
+	"""Get a single representative frame for the preview widget with status reporting."""
 	try:
 		if source_type.startswith("Live Camera"):
-			return get_webcam_stream().get_annotated_frame()
+			frame = get_webcam_stream().get_annotated_frame()
+			return (frame, get_webcam_stream().error) if frame is not None else (None, get_webcam_stream().error or "Camera feed initializing...")
 		frames = capture_frames(
 			source_type,
 			count=1,
@@ -801,9 +881,9 @@ def get_preview_frame(
 			uploaded_file=uploaded_file,
 			camera_file=camera_file,
 		)
-		return frames[0] if frames else None
-	except Exception:
-		return None
+		return (frames[0], None) if frames else (None, "No optical frame could be extracted.")
+	except Exception as exc:
+		return (None, str(exc))
 
 
 @st.fragment(run_every="350ms")
@@ -847,21 +927,80 @@ def render_static_preview(
 	key_prefix: str = "preview",
 ) -> None:
 	"""Render a static preview frame for sample identity, browser camera, or uploaded image."""
-	preview_frame = get_preview_frame(source_type, sample_name, uploaded_file, camera_file)
+	preview_frame, err_msg = get_preview_frame(source_type, sample_name, uploaded_file, camera_file)
 	if preview_frame is not None:
 		annotated = draw_face_overlay(preview_frame)
 		st.image(
 			cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-			caption="● STATIC FRAME INSPECTION • FACE OVERLAY ACTIVE",
+			caption="● OPTICAL FRAME INSPECTION • FACE DETECTOR ACTIVE",
 			width="stretch",
 		)
 	else:
 		if source_type.startswith("Browser Camera") and camera_file is None:
-			st.info("Please capture a photo above using the browser camera button.")
+			st.info("ℹ️ Click 'Take Photo' above to capture a snapshot from your browser camera.")
 		elif source_type.startswith("Upload Image") and uploaded_file is None:
-			st.info("Please select an image file to upload above.")
+			st.info("ℹ️ Upload an image file (JPG, PNG) above to inspect biometric frame.")
+		elif err_msg:
+			st.warning(f"⚠️ Optical Sensor Notice: {err_msg}")
 		else:
-			st.info("No frame available for preview.")
+			st.info("ℹ️ Optical frame initializing...")
+
+
+def render_optical_input_selector(
+	section_title: str,
+	key_prefix: str,
+) -> tuple[str, Optional[str], Any, Any]:
+	"""Render unified optical sensor selector, controls, and immediate preview.
+
+	Returns:
+		(source_type, selected_sample_filename, uploaded_file, camera_file)
+	"""
+	st.markdown(f'<div class="cds--tile"><div class="cds--tile-header">{section_title}</div>', unsafe_allow_html=True)
+	options, def_idx = get_camera_source_options()
+	source_type = st.radio(
+		"Sensor Source:",
+		options,
+		index=def_idx,
+		horizontal=True,
+		key=f"{key_prefix}_source_radio",
+	)
+
+	selected_sample: Optional[str] = None
+	up_file: Any = None
+	cam_file: Any = None
+
+	if source_type.startswith("Sample Identity"):
+		sample_map = get_sample_identities()
+		if sample_map:
+			labels = list(sample_map.keys())
+			selected_label = st.selectbox(
+				"Select Sample Identity:",
+				labels,
+				index=0,
+				key=f"{key_prefix}_sample_select",
+			)
+			selected_sample = sample_map[selected_label]
+			st.caption(
+				"💡 **Demo Profiles:** "
+				"**Alice** (Enrolled Genuine) • **Bob** (Unenrolled Genuine) • **Screen Replay** (Spoof Attack)"
+			)
+		else:
+			st.warning("⚠️ No sample face images found in `web/sample_faces`. Please use File Upload or Browser Camera.")
+
+	elif source_type.startswith("Browser Camera"):
+		cam_file = st.camera_input("Browser Webcam Snapshot", key=f"{key_prefix}_cam_input")
+
+	elif source_type.startswith("Upload Image"):
+		up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key=f"{key_prefix}_file_upload")
+
+	# Render Preview
+	if source_type.startswith("Live Camera"):
+		render_live_camera_feed(key_prefix)
+	else:
+		render_static_preview(source_type, selected_sample, up_file, cam_file, key_prefix=key_prefix)
+
+	st.markdown('</div>', unsafe_allow_html=True)
+	return source_type, selected_sample, up_file, cam_file
 
 
 # ── Active Liveness Gesture Evaluator (Hands-free verification) ──────────────
@@ -987,7 +1126,7 @@ GESTURE_INSTRUCTIONS = {
 
 
 # ── Persistent Top UI Shell Header ───────────────────────────────────────────
-render_carbon_shell_header()
+render_shell_header()
 
 
 # ── Sidebar Navigation & System Telemetry ────────────────────────────────────
@@ -995,11 +1134,10 @@ with st.sidebar:
 	st.markdown(
 		"""
 		<div style="padding: 10px 0 16px 0; border-bottom: 1px solid #393939; margin-bottom: 14px;">
-			<div style="font-size: 13px; letter-spacing: 0.16px;">
-				<span style="font-weight: 700; color: #0f62fe;">IBM</span>
-				<span style="font-weight: 600; color: #f4f4f4; margin-left: 6px;">Biometric Security</span>
+			<div style="font-size: 14px; font-weight: 700; color: #f4f4f4; letter-spacing: 0.2px;">
+				🛡️ SFRS Enterprise
 			</div>
-			<div style="font-size: 11px; color: #8d8d8d; margin-top: 2px;">Carbon Design System v11</div>
+			<div style="font-size: 11px; color: #8d8d8d; margin-top: 2px;">Biometric Security Platform</div>
 		</div>
 		""",
 		unsafe_allow_html=True,
@@ -1059,7 +1197,7 @@ with st.sidebar:
 # 1. RECOGNITION SCREEN
 # ═════════════════════════════════════════════════════════════════════════════
 if screen == "Recognition":
-	render_carbon_page_header(
+	render_page_header(
 		breadcrumb_section="Recognition",
 		title="Identity Verification & Access Control",
 		subtitle="Automated optical frame capture, dual presentation attack detection (PAD), and encrypted biometric template matching.",
@@ -1068,36 +1206,9 @@ if screen == "Recognition":
 	col_left, col_right = st.columns([1, 1], gap="large")
 
 	with col_left:
-		st.markdown('<div class="cds--tile"><div class="cds--tile-header">OPTICAL SENSOR INPUT</div>', unsafe_allow_html=True)
-		options, def_idx = get_camera_source_options()
-		source_type = st.radio(
-			"Sensor Source:",
-			options,
-			index=def_idx,
-			horizontal=True,
-			key="rec_source_radio",
+		source_type, selected_sample, up_file, cam_file = render_optical_input_selector(
+			"OPTICAL SENSOR INPUT", "rec"
 		)
-
-		selected_sample: Optional[str] = None
-		up_file: Any = None
-		cam_file: Any = None
-
-		if source_type.startswith("Sample Identity"):
-			sample_dir = PROJECT_ROOT / "web" / "sample_faces"
-			sample_files = list(sample_dir.glob("*.jpg")) if sample_dir.exists() else []
-			sample_options = ["None"] + [p.name for p in sample_files]
-			selected_sample = st.selectbox("Select Sample Photo:", sample_options, key="rec_sample_select")
-		elif source_type.startswith("Browser Camera"):
-			cam_file = st.camera_input("Browser Webcam Snapshot", key="rec_cam_input")
-		elif source_type.startswith("Upload Image"):
-			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="rec_file_upload")
-
-		# Preview display
-		if source_type.startswith("Live Camera"):
-			render_live_camera_feed("rec")
-		else:
-			render_static_preview(source_type, selected_sample, up_file, cam_file, key_prefix="rec")
-		st.markdown('</div>', unsafe_allow_html=True)
 
 	with col_right:
 		st.markdown('<div class="cds--tile"><div class="cds--tile-header">BIOMETRIC PIPELINE TELEMETRY</div>', unsafe_allow_html=True)
@@ -1142,9 +1253,12 @@ if screen == "Recognition":
 				)
 				st.rerun()
 
-			# Step 2: Fetch enrolled templates from database
+			# Step 2: Fetch enrolled templates from database (auto-seed sample STU-001 if newly initialized)
 			try:
 				records = services.enrollment.database.list_enrollments()
+				if not records:
+					_seed_sample_identities_if_empty(services)
+					records = services.enrollment.database.list_enrollments()
 				templates = {r.student_id: r.template for r in records}
 			except Exception as exc:
 				st.session_state["rec_status"] = f"Encrypted vault read error: {exc}"
@@ -1153,7 +1267,10 @@ if screen == "Recognition":
 
 			if not templates:
 				st.session_state["rec_status"] = "Encrypted biometric vault is empty."
-				st.session_state["rec_result"] = "No registered identity templates found. Please enroll at least one student in the Enrollment screen before running recognition."
+				st.session_state["rec_result"] = (
+					"VAULT EMPTY: No registered identity templates found.\n"
+					"Please enroll at least one student in the Enrollment screen before running recognition."
+				)
 				st.rerun()
 
 			# Step 3: Run pipeline on burst frames (Evaluating Match and Liveness separately)
@@ -1177,15 +1294,43 @@ if screen == "Recognition":
 					passive_scores.append(p_res.score)
 					used_model = getattr(p_res, "used_model", False)
 				except Exception:
-					passive_scores.append(0.5)
+					try:
+						p_res = services.passive_liveness.classify(frame)
+						passive_scores.append(p_res.score)
+					except Exception:
+						passive_scores.append(0.5)
 
 				# 3c. Face Matching (evaluated separately)
 				try:
 					rec_res = services.recognition.recognize(frame, templates)
-					if best_result is None or rec_res.score > best_result.score:
+					if rec_res and rec_res.face is not None:
+						detection_success = True
+					if best_result is None or (rec_res and rec_res.score > best_result.score):
 						best_result = rec_res
 				except Exception:
 					pass
+
+			# Explicit validation: If no face detected at all
+			if not detection_success and (best_result is None or best_result.score == 0.0):
+				st.session_state["rec_status"] = "Access Denied: No human face detected."
+				st.session_state["rec_result"] = (
+					"─── [OPTICAL SENSOR DETECTION] ────────────────────────\n"
+					"Verdict:   NO HUMAN FACE DETECTED\n"
+					"Details:   Optical sensor could not locate a face in the captured frames.\n"
+					"Action:    Please ensure face is centered, unobstructed, and looking directly at the camera.\n\n"
+					"ACCESS REJECTED: Optical acquisition failed."
+				)
+				st.session_state["active_liveness_required"] = False
+				try:
+					services.audit_logger.append_event(
+						result="DENIED",
+						student_id=None,
+						activity_type="RECOGNIZE",
+						metadata={"reason": "no_face_detected"},
+					)
+				except Exception:
+					pass
+				st.rerun()
 
 			avg_passive = float(np.mean(passive_scores)) if passive_scores else 0.0
 			passive_thresh = services.passive_liveness.threshold
@@ -1199,7 +1344,7 @@ if screen == "Recognition":
 				f"Score:     {avg_passive:.3f} (Threshold: {passive_thresh:.2f})\n"
 			)
 
-			is_match = best_result and best_result.accepted and best_result.student_id is not None
+			is_match = bool(best_result and best_result.accepted and best_result.student_id is not None)
 			match_score = (best_result.score * 100.0) if best_result else 0.0
 			matcher_thresh = services.matcher.threshold
 
@@ -1422,7 +1567,7 @@ if screen == "Recognition":
 # 2. ENROLLMENT SCREEN
 # ═════════════════════════════════════════════════════════════════════════════
 elif screen == "Enrollment":
-	render_carbon_page_header(
+	render_page_header(
 		breadcrumb_section="Enrollment",
 		title="Biometric Identity Enrollment",
 		subtitle="Register new subjects with multi-frame embedding aggregation, cancelable transform projection, and AES-256 database encryption.",
@@ -1431,40 +1576,14 @@ elif screen == "Enrollment":
 	col_left, col_right = st.columns([1, 1], gap="large")
 
 	with col_left:
-		st.markdown('<div class="cds--tile"><div class="cds--tile-header">REGISTRATION SENSOR FEED</div>', unsafe_allow_html=True)
-		options, def_idx = get_camera_source_options()
-		source_type = st.radio(
-			"Sensor Source:",
-			options,
-			index=def_idx,
-			horizontal=True,
-			key="enr_source_radio",
+		source_type, selected_sample, up_file, cam_file = render_optical_input_selector(
+			"REGISTRATION SENSOR FEED", "enr"
 		)
-
-		selected_sample: Optional[str] = None
-		up_file: Any = None
-		cam_file: Any = None
-
-		if source_type.startswith("Sample Identity"):
-			sample_dir = PROJECT_ROOT / "web" / "sample_faces"
-			sample_files = list(sample_dir.glob("*.jpg")) if sample_dir.exists() else []
-			sample_options = ["None"] + [p.name for p in sample_files]
-			selected_sample = st.selectbox("Select Sample Photo:", sample_options, key="enr_sample_select")
-		elif source_type.startswith("Browser Camera"):
-			cam_file = st.camera_input("Browser Webcam Snapshot", key="enr_cam_input")
-		elif source_type.startswith("Upload Image"):
-			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="enr_file_upload")
-
-		# Preview display
-		if source_type.startswith("Live Camera"):
-			render_live_camera_feed("enr")
-		else:
-			render_static_preview(source_type, selected_sample, up_file, cam_file, key_prefix="enr")
-		st.markdown('</div>', unsafe_allow_html=True)
 
 	with col_right:
 		st.markdown('<div class="cds--tile"><div class="cds--tile-header">SUBJECT CREDENTIALS & SAMPLES</div>', unsafe_allow_html=True)
-		student_id = st.text_input("Subject Unique ID", placeholder="e.g. STU-001", key="enroll_sid")
+		placeholder_id = "STU-002" if selected_sample and "bob" in selected_sample else ("STU-001" if selected_sample and "alice" in selected_sample else "e.g. STU-001")
+		student_id = st.text_input("Subject Unique ID", placeholder=placeholder_id, key="enroll_sid")
 		sample_count = st.slider("Automatic Frame Sample Count", min_value=1, max_value=10, value=5, step=1, key="enr_samples")
 
 		status_msg = st.session_state.get("enroll_status", "Ready to enroll new biometric identity.")
@@ -1495,6 +1614,20 @@ elif screen == "Enrollment":
 					camera_file=cam_file,
 				)
 
+				# 2. Check presentation attack detection during enrollment
+				try:
+					spoof_check = services.passive_liveness.classify(frames[0])
+					if not spoof_check.is_live and spoof_check.score < services.passive_liveness.threshold:
+						raise ValueError(
+							f"Enrollment rejected: Presentation attack detected by anti-spoofing engine (Score: {spoof_check.score:.3f}). "
+							"Only live authentic subjects may be enrolled."
+						)
+				except (ValueError, RuntimeError) as spoof_err:
+					raise spoof_err
+				except Exception:
+					pass
+
+				# 3. Extract multi-frame embeddings
 				embeddings = []
 				for idx, frame in enumerate(frames):
 					# Extract embedding and validate face
@@ -1505,8 +1638,11 @@ elif screen == "Enrollment":
 							face_crop = services.detector.detect_face(frame)
 							emb = services.embedder.extract_embedding(face_crop)
 					except Exception:
-						face_crop = services.detector.detect_face(frame)
-						emb = services.embedder.extract_embedding(face_crop)
+						try:
+							face_crop = services.detector.detect_face(frame)
+							emb = services.embedder.extract_embedding(face_crop)
+						except Exception:
+							emb = None
 
 					if emb is not None and len(emb) > 0:
 						embeddings.append(np.asarray(emb, dtype=np.float32))
@@ -1614,7 +1750,7 @@ elif screen == "Enrollment":
 # 3. AUDIT SCREEN
 # ═════════════════════════════════════════════════════════════════════════════
 elif screen == "Audit":
-	render_carbon_page_header(
+	render_page_header(
 		breadcrumb_section="Audit",
 		title="Immutable Access Audit Trail",
 		subtitle="Tamper-evident, cryptographically hash-chained event log with SHA-256 HMAC integrity verification and CSV export.",
@@ -1736,7 +1872,7 @@ elif screen == "Audit":
 # 4. SETTINGS SCREEN
 # ═════════════════════════════════════════════════════════════════════════════
 elif screen == "Settings":
-	render_carbon_page_header(
+	render_page_header(
 		breadcrumb_section="Settings",
 		title="System Operational Thresholds",
 		subtitle="Configure runtime biometric matching thresholds, presentation attack detection sensitivity, and active challenge timeouts.",
@@ -1801,7 +1937,7 @@ elif screen == "Settings":
 # 5. LIVENESS SCREEN
 # ═════════════════════════════════════════════════════════════════════════════
 elif screen == "Liveness":
-	render_carbon_page_header(
+	render_page_header(
 		breadcrumb_section="Diagnostics",
 		title="Presentation Attack Detection (PAD)",
 		subtitle="Inspect passive spoof detection scores (MiniFASNet neural model) and active interactive challenge session generator.",
@@ -1810,36 +1946,9 @@ elif screen == "Liveness":
 	col_left, col_right = st.columns([1, 1], gap="large")
 
 	with col_left:
-		st.markdown('<div class="cds--tile"><div class="cds--tile-header">DIAGNOSTIC SENSOR INPUT</div>', unsafe_allow_html=True)
-		options, def_idx = get_camera_source_options()
-		source_type = st.radio(
-			"Sensor Source:",
-			options,
-			index=def_idx,
-			horizontal=True,
-			key="liv_source_radio",
+		source_type, selected_sample, up_file, cam_file = render_optical_input_selector(
+			"DIAGNOSTIC SENSOR INPUT", "liv"
 		)
-
-		selected_sample: Optional[str] = None
-		up_file: Any = None
-		cam_file: Any = None
-
-		if source_type.startswith("Sample Identity"):
-			sample_dir = PROJECT_ROOT / "web" / "sample_faces"
-			sample_files = list(sample_dir.glob("*.jpg")) if sample_dir.exists() else []
-			sample_options = ["None"] + [p.name for p in sample_files]
-			selected_sample = st.selectbox("Select Sample Photo:", sample_options, key="liv_sample_select")
-		elif source_type.startswith("Browser Camera"):
-			cam_file = st.camera_input("Browser Webcam Snapshot", key="liv_cam_input")
-		elif source_type.startswith("Upload Image"):
-			up_file = st.file_uploader("Upload Image File", type=["jpg", "jpeg", "png"], key="liv_file_upload")
-
-		# Preview display
-		if source_type.startswith("Live Camera"):
-			render_live_camera_feed("liv")
-		else:
-			render_static_preview(source_type, selected_sample, up_file, cam_file, key_prefix="liv")
-		st.markdown('</div>', unsafe_allow_html=True)
 
 	with col_right:
 		st.markdown('<div class="cds--tile"><div class="cds--tile-header">PASSIVE SPOOF CLASSIFIER (PAD)</div>', unsafe_allow_html=True)
@@ -1863,8 +1972,12 @@ elif screen == "Liveness":
 				if not frames:
 					st.session_state["liv_passive_status"] = "Error: No optical frame available to classify."
 				else:
-					detection = services.detector.detect_face(frames[0])
-					face_crop = getattr(detection, "face", frames[0])
+					try:
+						detection = services.detector.detect_face(frames[0])
+						face_crop = getattr(detection, "face", frames[0])
+					except Exception:
+						face_crop = frames[0]
+
 					res = services.passive_liveness.classify(face_crop)
 					engine = "MiniFASNet (Neural Network)" if getattr(res, "used_model", False) else "Texture Analysis (Heuristic)"
 					verdict = "LIVE (AUTHENTIC)" if res.is_live else "SPOOF (PRESENTATION ATTACK)"
