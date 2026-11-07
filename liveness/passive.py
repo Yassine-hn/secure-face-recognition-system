@@ -120,11 +120,29 @@ class PassiveLivenessChecker:
 		return self._load_model() is not None
 
 	@staticmethod
-	def _score_from_model(model: Any, face_image: np.ndarray) -> float:
+	def _score_from_model(
+		model: Any,
+		face_image: np.ndarray,
+		frame: Optional[np.ndarray] = None,
+		bbox: Optional[Sequence[float | int]] = None,
+	) -> float:
+		prediction = None
 		if hasattr(model, "predict"):
-			prediction = model.predict(face_image)
+			try:
+				if frame is not None and bbox is not None:
+					prediction = model.predict(frame, bbox=bbox)
+				else:
+					prediction = model.predict(face_image)
+			except TypeError:
+				prediction = model.predict(face_image)
 		else:
-			prediction = model(face_image)
+			try:
+				if frame is not None and bbox is not None:
+					prediction = model(frame, bbox=bbox)
+				else:
+					prediction = model(face_image)
+			except TypeError:
+				prediction = model(face_image)
 
 		array = np.asarray(prediction, dtype=np.float32)
 		if array.size == 0:
@@ -133,7 +151,8 @@ class PassiveLivenessChecker:
 		if flat.size == 1:
 			return float(flat[0])
 
-		# MiniFASNet typically returns [spoof_prob, live_prob]. Use index 1 by default.
+		# MiniFASNet typically returns [spoof_prob, live_prob] or [spoof0, live1, spoof2].
+		# Use index 1 as live probability.
 		live_index = 1
 		if live_index >= flat.size:
 			live_index = flat.size - 1
@@ -143,8 +162,13 @@ class PassiveLivenessChecker:
 		)
 		return float(flat[live_index])
 
-	def score(self, face_crop: Any) -> tuple[float, bool]:
-		"""Return (score, used_model) for the given face crop."""
+	def score(
+		self,
+		face_crop: Any,
+		frame: Optional[np.ndarray] = None,
+		bbox: Optional[Sequence[float | int]] = None,
+	) -> tuple[float, bool]:
+		"""Return (score, used_model) for the given face crop or frame."""
 		image = _as_image(face_crop)
 		model = self._load_model()
 		if model is None:
@@ -153,7 +177,7 @@ class PassiveLivenessChecker:
 			_debug_print(f"[DEBUG] Passive liveness: using heuristic score={score:.3f}")
 			return score, False
 		try:
-			raw_score = self._score_from_model(model, image)
+			raw_score = self._score_from_model(model, image, frame=frame, bbox=bbox)
 		except Exception as exc:
 			_debug_print(f"[DEBUG] Passive liveness: model call failed: {exc}")
 			raise
@@ -161,8 +185,13 @@ class PassiveLivenessChecker:
 		_debug_print(f"[DEBUG] Passive liveness: model score={score:.3f}")
 		return score, True
 
-	def classify(self, face_crop: Any) -> PassiveLivenessResult:
-		raw_score, used_model = self.score(face_crop)
+	def classify(
+		self,
+		face_crop: Any,
+		frame: Optional[np.ndarray] = None,
+		bbox: Optional[Sequence[float | int]] = None,
+	) -> PassiveLivenessResult:
+		raw_score, used_model = self.score(face_crop, frame=frame, bbox=bbox)
 		label = self.live_label if raw_score >= self.threshold else self.spoof_label
 		if not used_model:
 			logger.warning(
@@ -177,8 +206,13 @@ class PassiveLivenessChecker:
 			label=label, score=raw_score, threshold=self.threshold, used_model=used_model,
 		)
 
-	def is_live(self, face_crop: Any) -> bool:
-		result = self.classify(face_crop)
+	def is_live(
+		self,
+		face_crop: Any,
+		frame: Optional[np.ndarray] = None,
+		bbox: Optional[Sequence[float | int]] = None,
+	) -> bool:
+		result = self.classify(face_crop, frame=frame, bbox=bbox)
 		if not result.used_model:
 			logger.warning(
 				"is_live() returning %s based on HEURISTIC fallback — "
@@ -187,8 +221,13 @@ class PassiveLivenessChecker:
 			)
 		return result.is_live
 
-	def __call__(self, face_crop: Any) -> PassiveLivenessResult:
-		return self.classify(face_crop)
+	def __call__(
+		self,
+		face_crop: Any,
+		frame: Optional[np.ndarray] = None,
+		bbox: Optional[Sequence[float | int]] = None,
+	) -> PassiveLivenessResult:
+		return self.classify(face_crop, frame=frame, bbox=bbox)
 
 	# Alias for convenience
 	evaluate = classify

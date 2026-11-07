@@ -27,11 +27,16 @@ The UI uses the same sequence:
 2. Recognition captures a burst of frames, checks passive liveness and averages the scores to reduce noise.
 3. If passive liveness passes or requires further verification, the enrolled templates are matched against the best recognized frame.
 4. Active liveness may be triggered, during which identity is continuously verified on the specific frames passing the challenges.
-4. Every grant or denial is written to the audit log.
+5. Every grant or denial is written to the tamper-evident HMAC-SHA256 audit log.
 
 ## UI structure
 
-The desktop application is routed from [ui/app.py](../ui/app.py). Each screen is isolated, but the screens share one injected service bundle:
+The system features dual user interfaces that share one centralized service bundle (`core/services.py`):
+
+1. **Interactive Web Dashboard** ([web/app.py](../web/app.py)): Streamlit-based web dashboard designed with IBM Carbon design system styling, supporting cloud hosting, browser webcam snapshots, image uploads, sample face testing, live camera streaming, real-time audit log exploration, and runtime threshold tuning.
+2. **Campus Kiosk Desktop Application** ([ui/app.py](../ui/app.py)): Native CustomTkinter GUI optimized for dedicated campus workstations with real-time OpenCV camera widgets.
+
+Each interface connects to the shared injected service bundle:
 
 - detector
 - embedder

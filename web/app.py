@@ -484,6 +484,9 @@ def _seed_sample_identities_if_empty(srv: AppServices) -> None:
 			return
 		sample_dir = PROJECT_ROOT / "web" / "sample_faces"
 		alice_file = sample_dir / "alice_sample.jpg"
+		bob_file = sample_dir / "bob_sample.jpg"
+
+		# Enroll Alice (STU-001)
 		if alice_file.exists():
 			img = cv2.imread(str(alice_file))
 			if img is not None and img.size > 0:
@@ -498,15 +501,32 @@ def _seed_sample_identities_if_empty(srv: AppServices) -> None:
 						embedding=emb,
 						metadata={"name": "Alice (Demo Genuine)", "source": "sample_seed"},
 					)
-					try:
-						srv.audit_logger.append_event(
-							result="GRANTED",
-							student_id="STU-001",
-							activity_type="SYSTEM_INIT",
-							metadata={"note": "Pre-enrolled sample profile STU-001 (Alice)"},
-						)
-					except Exception:
-						pass
+
+		# Enroll Bob (STU-002)
+		if bob_file.exists():
+			img_b = cv2.imread(str(bob_file))
+			if img_b is not None and img_b.size > 0:
+				try:
+					emb_b, _ = srv.embedder.extract_embedding_from_frame(img_b)
+				except Exception:
+					crop_b = srv.detector.detect_face(img_b)
+					emb_b = srv.embedder.extract_embedding(crop_b)
+				if emb_b is not None:
+					srv.enrollment.enroll_embedding(
+						student_id="STU-002",
+						embedding=emb_b,
+						metadata={"name": "Bob (Demo Genuine)", "source": "sample_seed"},
+					)
+
+		try:
+			srv.audit_logger.append_event(
+				result="GRANTED",
+				student_id="SYSTEM",
+				activity_type="SYSTEM_INIT",
+				metadata={"note": "Pre-enrolled sample profiles STU-001 (Alice) & STU-002 (Bob)"},
+			)
+		except Exception:
+			pass
 	except Exception as exc:
 		print(f"[SFRS] Demo database auto-seeding notice: {exc}")
 
@@ -1281,16 +1301,18 @@ if screen == "Recognition":
 
 			for frame in frames:
 				# 3a. Face Detection
+				det_bbox = None
 				try:
 					detection = services.recognition.detect_face(frame)
 					face_crop = getattr(detection, "face", frame)
+					det_bbox = getattr(detection, "bbox", None)
 					detection_success = True
 				except Exception:
 					face_crop = frame
 
-				# 3b. Passive Liveness (evaluated separately)
+				# 3b. Passive Liveness (evaluated separately with expanded scale 2.7 context)
 				try:
-					p_res = services.passive_liveness.classify(face_crop)
+					p_res = services.passive_liveness.classify(face_crop, frame=frame, bbox=det_bbox)
 					passive_scores.append(p_res.score)
 					used_model = getattr(p_res, "used_model", False)
 				except Exception:
@@ -1616,7 +1638,16 @@ elif screen == "Enrollment":
 
 				# 2. Check presentation attack detection during enrollment
 				try:
-					spoof_check = services.passive_liveness.classify(frames[0])
+					det_enr = None
+					try:
+						det_enr = services.detector.detect_face(frames[0])
+						crop_enr = getattr(det_enr, "face", frames[0])
+						bbox_enr = getattr(det_enr, "bbox", None)
+					except Exception:
+						crop_enr = frames[0]
+						bbox_enr = None
+
+					spoof_check = services.passive_liveness.classify(crop_enr, frame=frames[0], bbox=bbox_enr)
 					if not spoof_check.is_live and spoof_check.score < services.passive_liveness.threshold:
 						raise ValueError(
 							f"Enrollment rejected: Presentation attack detected by anti-spoofing engine (Score: {spoof_check.score:.3f}). "
@@ -1972,13 +2003,15 @@ elif screen == "Liveness":
 				if not frames:
 					st.session_state["liv_passive_status"] = "Error: No optical frame available to classify."
 				else:
+					det_bbox = None
 					try:
 						detection = services.detector.detect_face(frames[0])
 						face_crop = getattr(detection, "face", frames[0])
+						det_bbox = getattr(detection, "bbox", None)
 					except Exception:
 						face_crop = frames[0]
 
-					res = services.passive_liveness.classify(face_crop)
+					res = services.passive_liveness.classify(face_crop, frame=frames[0], bbox=det_bbox)
 					engine = "MiniFASNet (Neural Network)" if getattr(res, "used_model", False) else "Texture Analysis (Heuristic)"
 					verdict = "LIVE (AUTHENTIC)" if res.is_live else "SPOOF (PRESENTATION ATTACK)"
 					st.session_state["liv_passive_status"] = (

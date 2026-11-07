@@ -839,14 +839,16 @@ class RecognitionScreen(ScreenFrame):
 
 			for frame in frames:
 				# Get a cropped face for passive liveness
+				det_bbox = None
 				try:
 					detection = self.services.recognition.detect_face(frame)
 					face_crop = getattr(detection, "face", frame)
+					det_bbox = getattr(detection, "bbox", None)
 				except Exception:
 					face_crop = frame
 
-				# Run passive liveness
-				p_res = self.services.passive_liveness.classify(face_crop)
+				# Run passive liveness with expanded scale 2.7 context
+				p_res = self.services.passive_liveness.classify(face_crop, frame=frame, bbox=det_bbox)
 				passive_scores.append(p_res.score)
 				used_model = p_res.used_model
 

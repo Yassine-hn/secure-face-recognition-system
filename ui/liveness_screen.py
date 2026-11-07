@@ -53,13 +53,15 @@ class LivenessScreen(ScreenFrame):
 				self.passive_result_var.set("No frame available from camera.")
 				return
 
+			det_bbox = None
 			try:
 				detection = self.services.recognition.detect_face(frame)
 				face_crop = getattr(detection, "face", frame)
+				det_bbox = getattr(detection, "bbox", None)
 			except Exception:
 				face_crop = frame
 
-			result = self.services.passive_liveness.classify(face_crop)
+			result = self.services.passive_liveness.classify(face_crop, frame=frame, bbox=det_bbox)
 			if not result.used_model:
 				display = (
 					f"⚠ HEURISTIC FALLBACK — score {result.score:.3f}\n"

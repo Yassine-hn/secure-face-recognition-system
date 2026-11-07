@@ -34,6 +34,44 @@ class TestPassiveLiveness(unittest.TestCase):
         self.assertFalse(result.is_live)
         self.assertEqual(result.label, "spoof")
 
+    def test_classify_with_frame_and_bbox(self) -> None:
+        class FakeModelWithBBox:
+            def predict(self, frame_or_crop, bbox=None):
+                if bbox is not None:
+                    return np.array([0.05, 0.95, 0.0], dtype=np.float32)
+                return np.array([0.5, 0.5, 0.0], dtype=np.float32)
+
+        checker = PassiveLivenessChecker(model=FakeModelWithBBox(), threshold=0.5)
+        res = checker.classify(
+            np.zeros((10, 10, 3), dtype=np.uint8),
+            frame=np.zeros((100, 100, 3), dtype=np.uint8),
+            bbox=(10, 10, 40, 40),
+        )
+        self.assertTrue(res.is_live)
+        self.assertAlmostEqual(res.score, 0.95, places=4)
+
+    def test_minifasnet_native_architecture(self) -> None:
+        import torch
+        from liveness.minifasnet_model import MiniFASNetV2, CropImage, get_kernel, parse_model_name
+
+        h, w, mtype, scale = parse_model_name("2.7_80x80_MiniFASNetV2.pth")
+        self.assertEqual((h, w), (80, 80))
+        self.assertEqual(scale, 2.7)
+
+        kernel = get_kernel(h, w)
+        net = MiniFASNetV2(conv6_kernel=kernel)
+        dummy_input = torch.zeros((1, 3, 80, 80), dtype=torch.float32)
+        net.eval()
+        with torch.no_grad():
+            out = net(dummy_input)
+        self.assertEqual(out.shape, (1, 3))
+
+        # Test CropImage
+        cropper = CropImage()
+        org = np.zeros((200, 200, 3), dtype=np.uint8)
+        cropped = cropper.crop(org, bbox=[50, 50, 40, 40], scale=scale, out_w=80, out_h=80)
+        self.assertEqual(cropped.shape, (80, 80, 3))
+
 
 class TestBlinkChecks(unittest.TestCase):
     def setUp(self) -> None:

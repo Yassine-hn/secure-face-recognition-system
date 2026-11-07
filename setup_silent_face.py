@@ -22,12 +22,12 @@ def run_command(cmd, cwd=None):
         return False
 
 def setup_silent_face():
-    """Download and set up Silent-Face-Anti-Spoofing."""
+    """Verify and initialize Silent-Face-Anti-Spoofing MiniFASNet model."""
     project_root = Path(__file__).parent
     models_dir = project_root / "models"
     silent_face_dir = models_dir / "silent_face"
     
-    print("Setting up Silent-Face-Anti-Spoofing for passive liveness detection...")
+    print("Verifying Silent-Face-Anti-Spoofing for passive liveness detection...")
     print(f"Project root: {project_root}")
     print(f"Models directory: {models_dir}")
     
@@ -35,42 +35,30 @@ def setup_silent_face():
     models_dir.mkdir(exist_ok=True)
     silent_face_dir.mkdir(exist_ok=True)
     
-    # Clone the repository if not already present
-    repo_dir = silent_face_dir / "Silent-Face-Anti-Spoofing"
-    if not repo_dir.exists():
-        print("\n1. Cloning Silent-Face-Anti-Spoofing repository...")
-        # Use subprocess.run with list to avoid shell escaping issues
-        import subprocess
-        try:
-            subprocess.run(["git", "clone", "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing.git", str(repo_dir)], 
-                         check=True, cwd=silent_face_dir)
-            print("Repository cloned successfully")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to clone repository: {e}")
-            return False
-    else:
-        print("\n1. Repository already exists, skipping clone...")
-    
-    # Download model weights
+    # Verify model weights
     model_file = silent_face_dir / "2.7_80x80_MiniFASNetV2.pth"
     if not model_file.exists():
-        print("\n2. Downloading MiniFASNet model weights...")
-        # The model needs to be downloaded from a specific location
-        # For now, we'll provide instructions since direct download URLs may vary
-        print("Please download the MiniFASNet model manually:")
-        print("1. Visit: https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/releases")
-        print("2. Download the '2.7_80x80_MiniFASNetV2.pth' model file")
-        print(f"3. Place it in: {model_file}")
-        print("\nAlternatively, you can find pre-trained models in the repository's resources folder.")
+        print(f"\nModel weights file not found at: {model_file}")
+        print("Please ensure '2.7_80x80_MiniFASNetV2.pth' is located in models/silent_face/.")
         return False
     else:
-        print("\n2. Model weights already exist, skipping download...")
+        print(f"\nModel weights confirmed: {model_file.name} ({model_file.stat().st_size / (1024*1024):.2f} MB)")
     
-    print("\n3. Setup complete!")
-    print(f"Silent-Face-Anti-Spoofing is ready at: {silent_face_dir}")
-    print("\nTo verify the setup, run:")
-    print("python -c \"from liveness.silent_face_wrapper import get_silent_face_model; print('Model available:' if get_silent_face_model() else 'Model not available')\"")
-    
+    # Verify model import and inference
+    try:
+        from liveness.silent_face_wrapper import get_silent_face_model
+        model = get_silent_face_model()
+        if model is not None and model.is_available:
+            print("\nMiniFASNet neural model initialized and verified successfully!")
+            print(f"Device: {model.device}, Input Resolution: {model.input_size}, Scale: {model.scale}")
+        else:
+            print("\nWarning: Model could not be loaded into memory.")
+            return False
+    except Exception as e:
+        print(f"\nFailed to load MiniFASNet model: {e}")
+        return False
+
+    print("\nSetup & verification complete! Passive liveness PAD engine is ready.")
     return True
 
 if __name__ == "__main__":

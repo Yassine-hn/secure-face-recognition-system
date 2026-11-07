@@ -122,7 +122,8 @@ secure-face-recognition-system/
 ├── liveness/                      # 🛡️ Anti-Spoofing & Liveness Pipeline
 │   ├── passive.py                 # MiniFASNet CNN texture-based anti-spoofing
 │   ├── active.py                  # Challenge-response orchestration and session tokens
-│   ├── silent_face_wrapper.py     # Silent-Face-Anti-Spoofing model loader
+│   ├── minifasnet_model.py        # Native PyTorch MiniFASNetV2 neural architecture
+│   ├── silent_face_wrapper.py     # Multi-scale face cropper & inference runner
 │   └── checks/                    # MediaPipe challenge evaluators (blink, head pose, mouth, smile, iris)
 │
 ├── security/                      # 🔒 Cryptography & Database Security
@@ -146,7 +147,7 @@ secure-face-recognition-system/
 │   ├── metrics.py                 # ROC curve, AUC, and EER calculations
 │   └── attack_sim.py              # Attack presentation simulation runner
 │
-├── tests/                         # 🧪 Automated Test Suite (63 unit tests)
+├── tests/                         # 🧪 Automated Test Suite (67 unit tests)
 ├── scripts/                       # 🔧 Diagnostic and landmark calibration utilities
 ├── models/                        # 📦 Model weights placeholder and setup guides
 └── docs/                          # 📚 Comprehensive technical specifications
@@ -247,7 +248,7 @@ docker compose up --build
 ### 4. Running Tests & Security Preflight
 
 ```bash
-# Run unit tests (63 tests)
+# Run unit tests (67 tests)
 python -m unittest -q
 
 # Run with pytest

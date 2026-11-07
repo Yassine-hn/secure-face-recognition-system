@@ -12,3 +12,4 @@ dist/
 build/
 *.egg-info/
 docs/camera_feed_fix_local.md
+models/silent_face/Silent-Face-Anti-Spoofing/
